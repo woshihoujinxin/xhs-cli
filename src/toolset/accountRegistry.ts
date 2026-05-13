@@ -87,6 +87,25 @@ export function hasConfiguredAccounts(reg: AccountsRegistryFile): boolean {
   return Object.keys(reg.accounts).length > 0;
 }
 
+/**
+ * 选择本次命令使用的账号 slug：显式参数、`currentAccount`，或 registry 中仅有的一条记录。
+ * 均无法确定时返回 `undefined`。
+ */
+export function pickAccountSlug(
+  reg: AccountsRegistryFile,
+  explicit?: string,
+): string | undefined {
+  const opt = explicit?.trim();
+  if (opt) return opt;
+  const cur = reg.currentAccount?.trim();
+  if (cur) return cur;
+  const keys = Object.keys(reg.accounts);
+  if (keys.length === 1) {
+    return keys[0];
+  }
+  return undefined;
+}
+
 const DEFAULT_POLICY = `<!-- xhs-cli 默认策略模板，可自行修改 -->
 
 # 发帖与运营策略
@@ -187,6 +206,11 @@ export function formatAccountListLines(): string {
   if (cur) {
     lines.push('');
     lines.push(`当前默认账号: ${cur}`);
+  } else if (keys.length === 1) {
+    lines.push('');
+    lines.push(
+      `未设置默认账号；仅此一个已配置账号（${keys[0]}），命令将自动使用该账号会话。可用 xhs account use <name> 显式设为默认。`,
+    );
   } else {
     lines.push('');
     lines.push(

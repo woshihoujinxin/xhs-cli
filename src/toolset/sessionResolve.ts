@@ -2,23 +2,23 @@ import { BROWSER_USER_DATA_DIR, ensureAppDataLayout } from '../config.js';
 import {
   hasConfiguredAccounts,
   loadAccountsRegistry,
+  pickAccountSlug,
 } from './accountRegistry.js';
 import type { ResolvedSession } from './sessionTypes.js';
 
 /**
  * 解析本次命令使用的 Puppeteer userDataDir 与缓存前缀。
  *
- * - 未创建任何多账号：始终使用遗留 `browser-data`，缓存无前缀。
- * - 已有多账号且无 `explicitAccount` 且无 current：仍用遗留路径（兼容老用户）。
- * - 指定 `explicitAccount` 或非空 currentAccount：使用对应账号目录与 `accounts/<slug>/` 缓存前缀。
+ * - 未创建任何账号：使用遗留 `browser-data`，缓存无前缀。
+ * - 已配置账号：`explicitAccount` 优先，否则 `currentAccount`；若二者皆空且仅有一个账号，则自动使用该 slug。
+ * - 多个账号且无法确定 slug：回落遗留 `browser-data`。
  */
 export function resolveSession(explicitAccount?: string): ResolvedSession {
   ensureAppDataLayout();
   const reg = loadAccountsRegistry();
-  const opt = explicitAccount?.trim();
 
   if (!hasConfiguredAccounts(reg)) {
-    if (opt) {
+    if (explicitAccount?.trim()) {
       throw new Error(
         '尚未配置任何多账号会话。请先执行 xhs account add <name>，或去掉 --account 使用默认 ~/.xhs-cli/.cache/browser-data 。',
       );
@@ -29,10 +29,7 @@ export function resolveSession(explicitAccount?: string): ResolvedSession {
     };
   }
 
-  const slug =
-    opt && opt.length > 0 ? opt : reg.currentAccount && reg.currentAccount.length > 0
-      ? reg.currentAccount
-      : null;
+  const slug = pickAccountSlug(reg, explicitAccount) ?? null;
 
   if (!slug) {
     return {

@@ -19,6 +19,7 @@ import {
   setCurrentStoredAccount,
   loadAccountsRegistry,
   formatShowAccount,
+  pickAccountSlug,
 } from '../toolset/accountRegistry.js';
 import {
   createDraft,
@@ -96,8 +97,8 @@ function printHelp(): void {
   xhs help
       显示本帮助
 
-  # 会话与登录（可加 --account <slug>；未指定时用当前默认账号；无配置时沿用 ~/.xhs-cli/.cache/browser-data）
-  xhs login [--account <name>]
+  # 会话与登录（可加 --account / login <slug>；未指定时用默认账号；仅一个已配置账号时自动选用；无账号配置时沿用 ~/.xhs-cli/.cache/browser-data）
+  xhs login [--account <name> | <name>]
   xhs metrics [--account <name>]
   xhs posted [--account <name>] [--limit <n>]
   xhs note-detail <noteId> [--account <name>]
@@ -112,7 +113,8 @@ function printHelp(): void {
   xhs account show <name>
 
   # 草稿：创建 → approve → publish（publish 仅在成功发布后更新状态并写入 published）
-  xhs draft create --account <name> --title <标题> (--content | --content-file) [--image <路径>]...
+  xhs draft create [--account <name>] --title <标题> (--content | --content-file) [--image <路径>]...
+      （registry 仅一个账号时可省略 --account）
   xhs draft list [--account <name>] [--status draft|approved|published]
   xhs draft show <id>
   xhs draft approve <id>
@@ -184,6 +186,25 @@ function resolveSessionCli(explicitAccount?: string) {
   }
 }
 
+/** `login [--account slug | slug]`：位置参数 slug 等价于 `--account`，二者不可同时使用。 */
+function resolveLoginExplicitAccountSlug(
+  opts: Record<string, string>,
+  rest: string[],
+): string | undefined {
+  const fromFlag = opts.account?.trim();
+  const positional = rest[0]?.trim();
+  if (fromFlag && positional) {
+    die('❌ 用法: login --account <name> 时不要附加位置参数（与 login <name> 请勿同时使用）');
+  }
+  if (!fromFlag && rest.length > 1) {
+    die('❌ 用法: login [--account <name>] 或 login <name>');
+  }
+  if (opts.account !== undefined && !fromFlag) {
+    die('❌ --account 需要非空账号名');
+  }
+  return fromFlag || positional || undefined;
+}
+
 /** 扫描 argv 中的重复 `--image <path>`（与解析顺序无关） */
 function collectImagePaths(argv: string[]): string[] {
   const imagePaths: string[] = [];
@@ -215,9 +236,16 @@ function runAccountCommand(tail: string[]): void {
     if (sub === 'current') {
       const reg = loadAccountsRegistry();
       if (!reg.currentAccount) {
-        console.log(
-          '未设置默认账号；未指定 --account 时将使用 ~/.xhs-cli/.cache/browser-data 。',
-        );
+        const keys = Object.keys(reg.accounts);
+        if (keys.length === 1) {
+          console.log(
+            `未设置默认账号；仅此一个已配置账号（${keys[0]}），login/post 等将自动使用该账号。`,
+          );
+        } else {
+          console.log(
+            '未设置默认账号；未指定 --account 时将使用 ~/.xhs-cli/.cache/browser-data 。',
+          );
+        }
       } else {
         console.log(`当前默认账号: ${reg.currentAccount}`);
       }
@@ -269,11 +297,14 @@ async function runDraftCommand(tail: string[]): Promise<void> {
   try {
     if (sub === 'create') {
       const { opts } = parseOpts(rest);
-      const account = opts.account?.trim();
-      const title = opts.title?.trim();
+      const explicitAcc = opts.account?.trim();
+      const account = explicitAcc ?? pickAccountSlug(loadAccountsRegistry());
       if (!account) {
-        die('❌ draft create 需要 --account <name>');
+        die(
+          '❌ draft create 需要 --account <name>（已配置多个账号时须指定，或先执行 xhs account use <name>）',
+        );
       }
+      const title = opts.title?.trim();
       if (!title) {
         die('❌ draft create 需要 --title <标题>');
       }
@@ -389,8 +420,9 @@ export async function runOneCommand(argv: string[]): Promise<void> {
   }
 
   if (cmd === 'login') {
-    const { opts } = parseOpts(tail);
-    console.log(await implLogin(resolveSessionCli(opts.account)));
+    const { opts, rest } = parseOpts(tail);
+    const slug = resolveLoginExplicitAccountSlug(opts, rest);
+    console.log(await implLogin(resolveSessionCli(slug)));
     return;
   }
   if (cmd === 'metrics') {
@@ -461,7 +493,7 @@ export async function runOneCommand(argv: string[]): Promise<void> {
 async function runInteractiveLoop(): Promise<void> {
   const rl = createInterface({ input, output, terminal: true });
   printXhsInteractiveBanner();
-  console.error('交互模式：account / draft / published；login [--account]；metrics；posted；note-detail；post；help；exit。\n');
+  console.error('交互模式：account / draft / published；login [--account | <name>]；metrics；posted；note-detail；post；help；exit。\n');
   try {
     for (;;) {
       let line: string;
