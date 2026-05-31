@@ -11,8 +11,6 @@ export const ACCOUNT_SLUG_RE = /^[a-zA-Z0-9._-]+$/;
 
 export type StoredAccount = {
   name: string;
-  displayName: string;
-  role: string;
   createdAt: string;
   updatedAt: string;
   browserDataDir: string;
@@ -21,7 +19,7 @@ export type StoredAccount = {
 
 export type AccountsRegistryFile = {
   version: 1;
-  /** 默认账号 slug；无多账号或未设置时为 null */
+  /** 当前默认账号；未指定 `--account` 时使用（可用 `xhs account use` 切换） */
   currentAccount: string | null;
   accounts: Record<string, StoredAccount>;
 };
@@ -46,6 +44,27 @@ function defaultRegistry(): AccountsRegistryFile {
   };
 }
 
+function normalizeStoredAccount(slug: string, raw: unknown): StoredAccount {
+  const r = raw as Record<string, unknown>;
+  const now = new Date().toISOString();
+  const root = join(CACHE_DIR, 'accounts', slug);
+  const browserDefault = join(root, 'browser-data');
+  const policyDefault = join(root, 'policy.md');
+  return {
+    name: typeof r.name === 'string' && r.name.trim() ? r.name.trim() : slug,
+    createdAt: typeof r.createdAt === 'string' ? r.createdAt : now,
+    updatedAt: typeof r.updatedAt === 'string' ? r.updatedAt : now,
+    browserDataDir:
+      typeof r.browserDataDir === 'string' && r.browserDataDir.trim()
+        ? r.browserDataDir.trim()
+        : browserDefault,
+    policyPath:
+      typeof r.policyPath === 'string' && r.policyPath.trim()
+        ? r.policyPath.trim()
+        : policyDefault,
+  };
+}
+
 export function loadAccountsRegistry(): AccountsRegistryFile {
   ensureAppDataLayout();
   if (!existsSync(ACCOUNTS_REGISTRY_PATH)) {
@@ -61,7 +80,18 @@ export function loadAccountsRegistry(): AccountsRegistryFile {
     ) {
       return defaultRegistry();
     }
-    return parsed;
+    const accounts: Record<string, StoredAccount> = {};
+    for (const slug of Object.keys(parsed.accounts)) {
+      accounts[slug] = normalizeStoredAccount(slug, parsed.accounts[slug]);
+    }
+    return {
+      version: 1,
+      currentAccount:
+        typeof parsed.currentAccount === 'string' && parsed.currentAccount.trim()
+          ? parsed.currentAccount.trim()
+          : null,
+      accounts,
+    };
   } catch {
     return defaultRegistry();
   }
@@ -93,7 +123,7 @@ const DEFAULT_POLICY = `<!-- xhs-cli 默认策略模板，可自行修改 -->
 
 - **合规**：遵守法律法规与小红书社区规范。
 - **风格**：人设与选题与账号定位一致。
-- **发布**：仅人工确认后正式发布；可先本地草稿流转。
+- **发布**：仅人工确认后正式发布。
 
 与本账号相关的备注可写在下文：
 
@@ -115,11 +145,7 @@ export function ensureDefaultPolicy(policyPath: string): void {
   writeFileSync(policyPath, DEFAULT_POLICY.trimStart(), 'utf-8');
 }
 
-export function addStoredAccount(opts: {
-  name: string;
-  displayName: string;
-  role: string;
-}): StoredAccount {
+export function addStoredAccount(opts: { name: string }): StoredAccount {
   validateAccountSlug(opts.name);
   const slug = opts.name.trim();
   const reg = loadAccountsRegistry();
@@ -135,29 +161,40 @@ export function addStoredAccount(opts: {
   const now = new Date().toISOString();
   const row: StoredAccount = {
     name: slug,
-    displayName: opts.displayName.trim() || slug,
-    role: opts.role.trim() || 'general',
     createdAt: now,
     updatedAt: now,
     browserDataDir,
     policyPath,
   };
   reg.accounts[slug] = row;
-  if (!reg.currentAccount) {
+  const keys = Object.keys(reg.accounts);
+  if (
+    keys.length === 1 ||
+    !reg.currentAccount ||
+    !reg.accounts[reg.currentAccount]
+  ) {
     reg.currentAccount = slug;
   }
   saveAccountsRegistry(reg);
   return row;
 }
 
-export function setCurrentStoredAccount(slug: string): void {
+/** 将 registry 中的当前账号设为 `slug` */
+export function setCurrentAccount(slug: string): void {
   validateAccountSlug(slug);
   const reg = loadAccountsRegistry();
   if (!reg.accounts[slug]) {
-    throw new Error(`未知账号: ${slug}（请先 xhs account add）`);
+    throw new Error(`未知账号: ${slug}。可用 xhs account list 查看已配置账号。`);
   }
   reg.currentAccount = slug;
   saveAccountsRegistry(reg);
+}
+
+/** 返回 registry 中记录的当前账号（不校验是否存在） */
+export function getCurrentAccount(): string | null {
+  const reg = loadAccountsRegistry();
+  const cur = reg.currentAccount?.trim();
+  return cur && reg.accounts[cur] ? cur : null;
 }
 
 export function getStoredAccountOrThrow(slug: string): StoredAccount {
@@ -173,41 +210,32 @@ export function formatAccountListLines(): string {
   const reg = loadAccountsRegistry();
   const keys = Object.keys(reg.accounts).sort();
   if (keys.length === 0) {
-    return '尚未配置账号。可使用 xhs account add <name> 添加；在未配置或未指定 --account 时，会话仍使用默认目录 ~/.xhs-cli/.cache/browser-data 。';
+    return '尚未配置账号。请先执行 xhs account add <name>。';
   }
+  const cur = getCurrentAccount();
   const lines: string[] = [];
-  const cur = reg.currentAccount ?? '';
   for (const k of keys) {
     const a = reg.accounts[k];
-    const mark = cur === k ? '* ' : '  ';
-    lines.push(
-      `${mark}${a.name}\t显示名:${a.displayName}\trole:${a.role}\t会话:${a.browserDataDir}`,
-    );
+    const mark = k === cur ? ' *' : '';
+    lines.push(`${a.name}${mark}\t会话:${a.browserDataDir}`);
   }
+  lines.push('');
   if (cur) {
-    lines.push('');
-    lines.push(`当前默认账号: ${cur}`);
+    lines.push(`当前账号: ${cur}（列表中带 *）。切换: xhs account use <name>`);
   } else {
-    lines.push('');
-    lines.push(
-      '未设置默认账号（当前使用遗留会话目录 ~/.xhs-cli/.cache/browser-data ）。可用 xhs account use <name> 指定。',
-    );
+    lines.push('未设置当前账号。请执行: xhs account use <name>');
   }
+  lines.push('临时指定: --account <slug>。');
   return lines.join('\n');
 }
 
 export function formatShowAccount(slug: string): string {
   const a = getStoredAccountOrThrow(slug);
-  const reg = loadAccountsRegistry();
-  const isCur = reg.currentAccount === slug;
   return [
     `name: ${a.name}`,
-    `displayName: ${a.displayName}`,
-    `role: ${a.role}`,
     `createdAt: ${a.createdAt}`,
     `updatedAt: ${a.updatedAt}`,
     `browserDataDir: ${a.browserDataDir}`,
     `policyPath: ${a.policyPath}`,
-    `currentDefault: ${isCur}`,
   ].join('\n');
 }
