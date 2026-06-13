@@ -2,6 +2,7 @@
  * CLI：子命令直接调用 toolset 中的 impl*；自然语言 Agent 由外部宿主集成。
  */
 import { readFileSync, existsSync } from 'fs';
+import { fileURLToPath } from 'url';
 import {
   implLogin,
   implGetOperationData,
@@ -45,6 +46,9 @@ function printHelp(): void {
   xhs help
       显示本帮助（无子命令时也会打印本说明）
 
+  xhs version
+      显示版本号（别名 -v / --version）
+
   # 业务命令默认使用当前账号（xhs account use）；临时切换用 --account <name>
   xhs login [--account <name>]
   xhs metrics [--account <name>]
@@ -64,6 +68,29 @@ function printHelp(): void {
 数据目录见 ~/.config/xhs-cli/.cache/（详见 README 与 src/config.ts）。
 备注：不会在无人确认时擅自发帖；xhs post 的 --publish 由人工按需触发。
 `);
+}
+
+function printVersion(): void {
+  // dist 在 node_modules/@easyasstudio/xhs-cli/dist/cli/,package.json 在上两级
+  // 开发时 src/cli/,package.json 在上两级 —— 路径一致
+  const candidates = [
+    fileURLToPath(new URL('../../package.json', import.meta.url)),
+    fileURLToPath(new URL('../../../package.json', import.meta.url)),
+  ];
+  let pkg: { name?: string; version?: string } = {};
+  for (const p of candidates) {
+    try {
+      if (existsSync(p)) {
+        pkg = JSON.parse(readFileSync(p, 'utf-8'));
+        break;
+      }
+    } catch {
+      // 继续尝试下一个候选路径
+    }
+  }
+  const name = pkg.name ?? 'xhs-cli';
+  const version = pkg.version ?? 'unknown';
+  console.log(`${name} ${version}`);
 }
 
 function resolveSessionCli(explicitAccount?: string) {
@@ -175,6 +202,14 @@ export async function runOneCommand(argv: string[]): Promise<void> {
       setCurrentAccount(session.account);
     }
     console.log(msg);
+    return;
+  }
+  if (cmd === 'version' || cmd === '-v' || cmd === '--version') {
+    const { rest } = parseOpts(tail);
+    if (rest.length > 0) {
+      die('❌ 用法: version(无参数)');
+    }
+    printVersion();
     return;
   }
   if (cmd === 'home' || cmd === 'open') {
