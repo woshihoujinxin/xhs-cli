@@ -54,7 +54,8 @@ function findMetric(source: HomeBlockRow[], keywords: string[]): string {
     const item = source.find((row) => row.title.includes(keyword));
     if (item) return item.number;
   }
-  return '0';
+  // 找不到时返回 — 而非 0(避免误导:小红书改版后部分指标在 home 页已不显示)
+  return '—';
 }
 
 function formatOperationSnapshot(snapshot: OperationDataSnapshot): string {
@@ -103,7 +104,20 @@ export class XHSOperationDataFetcher {
     const homeData = await this.fetchHomeData();
     const fanData = await this.fetchFanData();
     const trafficSources = await this.fetchTrafficSources();
-    return this.transformToSnapshot(homeData, fanData, trafficSources);
+    const publishedNotes = await this.fetchPublishedNotesCount();
+    return this.transformToSnapshot(homeData, fanData, trafficSources, publishedNotes);
+  }
+
+  // 新版创作者后台 home 页不再显示"笔记数"指标,改去 note-manager 页数 .note-card 数量
+  async fetchPublishedNotesCount(): Promise<string> {
+    try {
+      await this.navigate('https://creator.xiaohongshu.com/new/note-manager');
+      await new Promise((r) => setTimeout(r, 3000));
+      const count = await this.page.evaluate(() => document.querySelectorAll('.note-card').length);
+      return String(count);
+    } catch {
+      return '—';
+    }
   }
 
   private async fetchHomeData(): Promise<HomeBlockRow[]> {
@@ -206,6 +220,7 @@ export class XHSOperationDataFetcher {
     homeData: HomeBlockRow[],
     fanData: FanSummary,
     trafficSources: TrafficSourceRow[],
+    publishedNotes = '—',
   ): OperationDataSnapshot {
     const newFansNum = parseInt(fanData.newFans, 10) || 0;
     const lostFansNum = parseInt(fanData.lostFans, 10) || 0;
@@ -220,7 +235,7 @@ export class XHSOperationDataFetcher {
       totalCollects: findMetric(homeData, ['收藏']),
       totalComments: findMetric(homeData, ['评论']),
       totalShares: findMetric(homeData, ['分享']),
-      publishedNotes: findMetric(homeData, ['笔记']),
+      publishedNotes: publishedNotes,
       noteReads: findMetric(homeData, ['阅读']),
       noteReadRate: findMetric(homeData, ['阅读率']),
       avgReadTime: findMetric(homeData, ['时长', '平均']),

@@ -9,6 +9,7 @@ interface NoteRaw {
   title: string;
   publishTime: string;
   url: string;
+  tag: string;          // 审核状态(审核中/已发布/已下架),新版创作者后台才有
   views: string;
   likes: string;
   comments: string;
@@ -18,8 +19,9 @@ interface NoteRaw {
 }
 
 function formatNote(note: NoteRaw): string {
+  const tag = note.tag ? `  [${note.tag}]` : '';
   return [
-    `ID: ${note.noteId}`,
+    `ID: ${note.noteId}${tag}`,
     `标题: ${note.title}`,
     `发布时间: ${note.publishTime}`,
     `链接: ${note.url}`,
@@ -27,24 +29,36 @@ function formatNote(note: NoteRaw): string {
   ].join('\n');
 }
 
-async function getInteractionCount(page: Page, card: ElementHandle, type: string): Promise<string> {
-  const iconList = await card.$('.icon_list');
-  if (!iconList) return '0';
-  const icons = await iconList.$$('.icon');
-  for (const icon of icons) {
-    const iconText = await page.evaluate((el, targetType) => {
-      const d = el.querySelector('svg path')?.getAttribute('d') ?? '';
-      const count = (el.querySelector('span')?.textContent ?? '').trim();
-      if (targetType === 'views'     && (d.includes('M21.83 11.442') || d.includes('M15 12')))        return count;
-      if (targetType === 'likes'     && (d.includes('M12 22c5.5 0')  || d.includes('M8.4 11')))       return count;
-      if (targetType === 'favorites' && (d.includes('M12 4.32A6.19') || d.includes('l7.244 7.17')))   return count;
-      if (targetType === 'comments'  && (d.includes('M5.873 21.142') || d.includes('l.469-4.549')))   return count;
-      if (targetType === 'shares'    && (d.includes('M20.673 12.764')|| d.includes('l-8.612-6.236'))) return count;
-      return null;
-    }, icon, type);
-    if (iconText) return iconText;
-  }
-  return '0';
+// 新版小红书创作者后台(.note-card)的互动数提取
+// 5 个 .note-card__stat 按顺序:浏览/点赞/评论/收藏/分享
+async function getNewInteractions(page: Page, card: ElementHandle): Promise<{
+  views: string; likes: string; comments: string; favorites: string; shares: string;
+}> {
+  return await page.evaluate((el) => {
+    const stats = el.querySelectorAll('.note-card__stat');
+    const texts: string[] = Array.from(stats).map(s => {
+      const span = s.querySelector('span');
+      return span ? (span.textContent || '').trim() : '0';
+    });
+    // 兜底:有些版本互动数直接在 .note-card__stats 下的 span
+    if (texts.length === 0) {
+      const statsContainer = el.querySelector('.note-card__stats');
+      if (statsContainer) {
+        statsContainer.querySelectorAll('span').forEach(s => {
+          const t = (s.textContent || '').trim();
+          if (/^\d+$/.test(t)) texts.push(t);
+        });
+      }
+    }
+    while (texts.length < 5) texts.push('0');
+    return {
+      views: texts[0] || '0',
+      likes: texts[1] || '0',
+      comments: texts[2] || '0',
+      favorites: texts[3] || '0',
+      shares: texts[4] || '0',
+    };
+  }, card);
 }
 
 async function scrapeRecentPosts(
@@ -56,62 +70,60 @@ async function scrapeRecentPosts(
     waitUntil: 'domcontentloaded',
     timeout: 30000,
   });
-  await new Promise((r) => setTimeout(r, 3000));
+  await new Promise((r) => setTimeout(r, 4000));
 
-  const noteCards = await page.$$('div.note');
+  // 新版小红书创作者后台:笔记卡片是 .note-card(旧版 div.note 已随改版失效)
+  const noteCards = await page.$$('.note-card');
   const results: NoteRaw[] = [];
 
   for (const card of noteCards) {
     if (typeof limit === 'number' && results.length >= limit) break;
 
-    const impressionData = await page.evaluate((el) => {
+    const data = await page.evaluate((el) => {
       const raw = el.getAttribute('data-impression');
-      if (!raw) return null;
-      try { return JSON.parse(raw); } catch { return null; }
+      let noteId = '';
+      if (raw) {
+        try { noteId = (JSON.parse(raw) as any)?.noteTarget?.value?.noteId ?? ''; } catch { /* ignore */ }
+      }
+      const titleEl = el.querySelector('.note-card__title');
+      const timeEl  = el.querySelector('.note-card__time');
+      const tagEl   = el.querySelector('.note-card__tag');
+      // 封面图:新版在 .note-card__media img 或 .media-bg background-image
+      let coverImage = '';
+      const imgEl = el.querySelector('.note-card__media img');
+      if (imgEl) coverImage = imgEl.getAttribute('src') || '';
+      if (!coverImage) {
+        const bgEl = el.querySelector('.media-bg');
+        if (bgEl) {
+          const style = bgEl.getAttribute('style') || '';
+          const m = style.match(/url\(["']?([^"']+)["']?\)/);
+          if (m) coverImage = m[1];
+        }
+      }
+      return {
+        noteId,
+        title: titleEl ? (titleEl.textContent || '').trim() : '未知标题',
+        publishTime: timeEl ? (timeEl.textContent || '').trim() : '',
+        tag: tagEl ? (tagEl.textContent || '').trim() : '',
+        coverImage,
+      };
     }, card);
 
-    const noteId: string = impressionData?.noteTarget?.value?.noteId ?? '';
-    if (!noteId) continue;
+    if (!data.noteId) continue;
 
-    const cacheKey = prefixedCacheFilename(session.cachePathPrefix, `notes/${noteId}.json`);
+    const cacheKey = prefixedCacheFilename(session.cachePathPrefix, `notes/${data.noteId}.json`);
     const cached = loadFromCache<NoteRaw>(cacheKey);
 
-    const views    = await getInteractionCount(page, card, 'views');
-    const likes    = await getInteractionCount(page, card, 'likes');
-    const comments = await getInteractionCount(page, card, 'comments');
-    const favorites= await getInteractionCount(page, card, 'favorites');
-    const shares   = await getInteractionCount(page, card, 'shares');
+    const interactions = await getNewInteractions(page, card);
 
     let note: NoteRaw;
     if (cached) {
-      note = { ...cached, views, likes, comments, favorites, shares };
+      note = { ...cached, ...data, ...interactions };
     } else {
-      const titleEl = await card.$('.info .title');
-      const title   = titleEl ? await page.evaluate((el) => (el.textContent ?? '').trim(), titleEl) : '未知标题';
-
-      const timeEl      = await card.$('.info .time');
-      const publishTime = timeEl ? await page.evaluate((el) => (el.textContent ?? '').trim(), timeEl) : '';
-
-      let coverImage = '';
-      const imgEl = await card.$('.img img');
-      if (imgEl) {
-        coverImage = await page.evaluate((el) => el.getAttribute('src') ?? '', imgEl);
-      } else {
-        const bgEl = await card.$('.img .media-bg');
-        if (bgEl) {
-          const style    = await page.evaluate((el) => el.getAttribute('style') ?? '', bgEl);
-          const urlMatch = style.match(/url\(["']?([^"']+)["']?\)/);
-          if (urlMatch) coverImage = urlMatch[1];
-        }
-      }
-
       note = {
-        noteId,
-        title,
-        publishTime,
-        url: `https://www.xiaohongshu.com/explore/${noteId}`,
-        views, likes, comments, favorites, shares,
-        coverImage,
+        ...data,
+        url: `https://www.xiaohongshu.com/explore/${data.noteId}`,
+        ...interactions,
       };
     }
 

@@ -8,6 +8,7 @@ import {
   implPosted,
   implGetNoteDetail,
   implPost,
+  implOpenHome,
   resolveSession,
 } from '../toolset/index.js';
 import {
@@ -174,6 +175,16 @@ export async function runOneCommand(argv: string[]): Promise<void> {
       setCurrentAccount(session.account);
     }
     console.log(msg);
+    return;
+  }
+  if (cmd === 'home' || cmd === 'open') {
+    const { opts, rest } = parseOpts(tail);
+    const pageName = rest[0]?.trim() || 'home';
+    const validPages = ['home', 'note-manager', 'note', 'content', 'fans', 'profile'];
+    if (rest.length > 1 || (rest.length === 1 && !validPages.includes(pageName))) {
+      die('❌ 用法: home [home|note-manager|content|fans|profile] [--account <name>]');
+    }
+    await implOpenHome(resolveSessionCli(accountFromOpts(opts)), pageName);
     return;
   }
   if (cmd === 'metrics') {

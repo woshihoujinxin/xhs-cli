@@ -7,6 +7,7 @@ import { getNoteDetail } from './get_note_detail.js';
 import { formatUserProfileText } from './get_profile.js';
 import { getRecentPosts } from './get_recent_posts.js';
 import { postNote, type PostNoteArgs } from './post.js';
+import { openHome } from './open_home.js';
 import { resolveAccountSlug, resolveSession } from './sessionResolve.js';
 import type { ResolvedSession } from './sessionTypes.js';
 
@@ -54,6 +55,10 @@ export async function implPost(args: PostNoteArgs): Promise<string> {
   } catch (e) {
     return `❌ ${e instanceof Error ? e.message : String(e)}`;
   }
+}
+
+export async function implOpenHome(session: ResolvedSession, pageName?: string): Promise<void> {
+  return openHome(session, pageName);
 }
 
 export { resolveAccountSlug, resolveSession };
