@@ -51,6 +51,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@easyasstudio/xhs-cli": "^1.4.3",
     "puppeteer-core": "^24.29.1"
   },
   "devDependencies": {
