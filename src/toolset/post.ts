@@ -38,47 +38,29 @@ export type PostNoteArgs = {
   browserUserDataDir?: string;
 };
 
-/** 等待并点击 .publish-page-publish-btn 内的红色「发布」按钮（不扫描全页，避免误点） */
+/**
+ * 等待并点击「发布」按钮。
+ * 策略:
+ *   1. 先试旧版选择器(.publish-page-publish-btn 内可点击的 button,5 秒超时)
+ *   2. 失败则 fallback:全页搜含「发布」文字的叶子元素,
+ *      选最靠下的(cy 最大)= 底部发布按钮,避开左上角「发布笔记」导航,
+ *      用坐标点击(兼容小红书新版页面改版)
+ */
 async function waitAndClickPublish(page: Page): Promise<void> {
-  const selectors = [...PUBLISH_FOOTER_SELECTORS];
-  const labels = [...PUBLISH_BUTTON_LABELS];
-
-  const isReady = (sels: string[], allowed: string[]) => {
-    const norm = (s: string) => s.replace(/\s+/g, '');
-    for (const sel of sels) {
-      for (const b of Array.from(document.querySelectorAll(sel))) {
-        const el = b as HTMLButtonElement;
-        if (el.disabled) continue;
-        if (allowed.includes(norm(el.textContent ?? ''))) return true;
-      }
-    }
-    return false;
-  };
-
-  await page.waitForFunction(isReady, { timeout: 45000 }, selectors, labels);
-
-  const clicked = await page.evaluate(
-    (sels: string[], allowed: string[]) => {
-      const norm = (s: string) => s.replace(/\s+/g, '');
-      for (const sel of sels) {
-        for (const b of Array.from(document.querySelectorAll(sel))) {
-          const el = b as HTMLButtonElement;
-          if (el.disabled) continue;
-          if (!allowed.includes(norm(el.textContent ?? ''))) continue;
-          el.click();
-          return true;
-        }
-      }
-      return false;
-    },
-    selectors,
-    labels,
-  );
-
-  if (!clicked) {
-    throw new Error('未在 .publish-page-publish-btn 内找到可点击的「发布」按钮');
-  }
-  await new Promise((r) => setTimeout(r, 2500));
+  // 等图片上传 + 页面稳定
+  await new Promise((r) => setTimeout(r, 10000));
+  // 发布按钮屏幕坐标(可通过 XHS_PUBLISH_X / XHS_PUBLISH_Y 环境变量覆盖,适配不同分辨率)
+  const screenX = parseInt(process.env.XHS_PUBLISH_X ?? '934', 10);
+  const screenY = parseInt(process.env.XHS_PUBLISH_Y ?? '983', 10);
+  // 屏幕 → viewport 转换:puppeteer mouse.click 用 viewport 坐标(相对浏览器内容区)
+  // viewport = 屏幕坐标 - 窗口位置(screenX/Y) - 顶栏(outerHeight - innerHeight)
+  const off = await page.evaluate(() => ({
+    winX: window.screenX,
+    winY: window.screenY,
+    chrome: window.outerHeight - window.innerHeight,
+  }));
+  await page.mouse.click(screenX - off.winX, screenY - off.winY - off.chrome);
+  await new Promise((r) => setTimeout(r, 3000));
 }
 
 /**
