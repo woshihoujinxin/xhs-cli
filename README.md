@@ -12,7 +12,7 @@
 ## 安装
 
 ```bash
-npm install -g xhs-cli
+npm i -g @easyasstudio/xhs-cli
 ```
 
 安装后使用命令 **`xhs`**。完整子命令列表：`xhs help`。
@@ -104,5 +104,5 @@ xhs posted
 
 ## 链接
 
-- 仓库：<https://github.com/joohw/xhs-cli>
-- Issues：<https://github.com/joohw/xhs-cli/issues>
+- 仓库：<https://github.com/woshihoujinxin/xhs-cli>
+- Issues：<https://github.com/woshihoujinxin/xhs-cli/issues>
