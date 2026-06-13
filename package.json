@@ -1,5 +1,5 @@
 {
-  "name": "@woshihoujinxin/xhs-cli",
+  "name": "@easyasstudio/xhs-cli",
   "version": "1.4.3",
   "description": "小红书创作者 CLI(fork: 配置目录统一到 ~/.config/xhs-cli,与 xianyu-auto skill 约定一致)",
   "type": "module",
