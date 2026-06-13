@@ -6,7 +6,7 @@
 
 - 若使用 **pi-agent-core** 等宿主：在宿主侧注册工具，**execute** 里直接调用同名 **`impl*`**（与 CLI 共用实现）。业务调用须传入 **`ResolvedSession`**（例如先 `resolveSession()` 或 `resolveSession('<slug>')` 再传给 `implLogin` 等）。
 - **账号**：未传 `--account` 时仅使用 registry 的 **`currentAccount`**（无单账号自动推断、无位置参数 slug）。无当前账号时 `resolveSession()` 会抛错，须 `xhs account use <slug>` 或 `resolveSession('<slug>')`。
-- 数据与缓存目录约定见 **`src/config.ts`**（应用根 `~/.xhs-cli`，业务数据在 `~/.xhs-cli/.cache/`）。
+- 数据与缓存目录约定见 **`src/config.ts`**（应用根 `~/.config/xhs-cli`，业务数据在 `~/.config/xhs-cli/.cache/`）。
 
 ## 入口
 
@@ -15,10 +15,10 @@
 
 ## 目录约定（`src/config.ts`）
 
-- 应用根目录：`~/.xhs-cli`（仅作父目录）
-- 应用生成内容：`~/.xhs-cli/.cache/`
-- **多账号**：`~/.xhs-cli/.cache/accounts/<slug>/browser-data`；**当前账号**在 `accounts/registry.json` 的 `currentAccount`
-- 发布归档（可选）：`~/.xhs-cli/.cache/published/`
+- 应用根目录：`~/.config/xhs-cli`（仅作父目录）
+- 应用生成内容：`~/.config/xhs-cli/.cache/`
+- **多账号**：`~/.config/xhs-cli/.cache/accounts/<slug>/browser-data`；**当前账号**在 `accounts/registry.json` 的 `currentAccount`
+- 发布归档（可选）：`~/.config/xhs-cli/.cache/published/`
 
 **发帖**：`post` 子命令仅使用当次传入的 `--title`、`--content`（或 `--content-file`）与 `--image` 路径。
 

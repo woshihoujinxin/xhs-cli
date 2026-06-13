@@ -53,14 +53,14 @@ function printHelp(): void {
   xhs post (--title <标题> (--content <正文> | --content-file <路径>))
               [--image <路径>]... [--publish | --publish=true|false] [--account <name>]
 
-  # 账号（配置存 ~/.xhs-cli/.cache/accounts/registry.json ，每账号独立 browser-data）
+  # 账号（配置存 ~/.config/xhs-cli/.cache/accounts/registry.json ，每账号独立 browser-data）
   xhs account list
   xhs account add <name>
   xhs account show <name>
   xhs account use <name>
   xhs account current
 
-数据目录见 ~/.xhs-cli/.cache/（详见 README 与 src/config.ts）。
+数据目录见 ~/.config/xhs-cli/.cache/（详见 README 与 src/config.ts）。
 备注：不会在无人确认时擅自发帖；xhs post 的 --publish 由人工按需触发。
 `);
 }

@@ -1,7 +1,7 @@
 {
-  "name": "xhs-cli",
-  "version": "1.4.2",
-  "description": "小红书创作者 CLI：多账号会话、发帖与数据抓取（人机确认发布）",
+  "name": "@woshihoujinxin/xhs-cli",
+  "version": "1.4.3",
+  "description": "小红书创作者 CLI(fork: 配置目录统一到 ~/.config/xhs-cli,与 xianyu-auto skill 约定一致)",
   "type": "module",
   "main": "dist/cli/index.js",
   "types": "dist/cli/index.d.ts",
@@ -34,16 +34,19 @@
     "cover-generation",
     "image-generation"
   ],
-  "author": "Joo <1546635571@qq.com>",
+  "author": "Joo <1546635571@qq.com> (original); fork maintained by woshihoujinxin",
   "license": "GPL-3.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/joohw/xhs-cli.git"
+    "url": "git+https://github.com/woshihoujinxin/xhs-cli.git"
   },
   "bugs": {
-    "url": "https://github.com/joohw/xhs-cli/issues"
+    "url": "https://github.com/woshihoujinxin/xhs-cli/issues"
   },
-  "homepage": "https://github.com/joohw/xhs-cli#readme",
+  "homepage": "https://github.com/woshihoujinxin/xhs-cli#readme",
   "engines": {
     "node": ">=20.0.0"
   },

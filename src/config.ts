@@ -1,5 +1,5 @@
 // src/config.ts
-// 配置文件 — 所有应用生成的数据位于 ~/.xhs-cli/.cache/（测试可用 XHS_CLI_HOME 覆盖）
+// 配置文件 — 所有应用生成的数据位于 ~/.config/xhs-cli/.cache/（测试可用 XHS_CLI_HOME 覆盖）
 
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
@@ -10,7 +10,8 @@ function resolveAppHome(): string {
   if (override) {
     return override;
   }
-  return join(homedir(), '.xhs-cli');
+  // 默认统一到 ~/.config/xhs-cli(与 xianyu-auto 其他 skill 的 ~/.config/<skill>/ 约定一致)
+  return join(homedir(), '.config', 'xhs-cli');
 }
 
 /** 应用主目录（仅作根路径，业务数据在 .cache 下） */
@@ -26,9 +27,9 @@ export const BROWSER_USER_DATA_DIR = join(CACHE_DIR, 'browser-data');
 
 /** 多账号元数据目录（会话目录在每账号子目录 browser-data） */
 export const ACCOUNTS_ROOT = join(CACHE_DIR, 'accounts');
-/** 账号注册表：`~/.xhs-cli/.cache/accounts/registry.json` */
+/** 账号注册表：`~/.config/xhs-cli/.cache/accounts/registry.json` */
 export const ACCOUNTS_REGISTRY_PATH = join(ACCOUNTS_ROOT, 'registry.json');
-/** 已发布归档：`~/.xhs-cli/.cache/published/` */
+/** 已发布归档：`~/.config/xhs-cli/.cache/published/` */
 export const PUBLISHED_ROOT = join(CACHE_DIR, 'published');
 
 // 笔记缓存目录
@@ -40,7 +41,7 @@ export const SANDBOX_DIR = join(CACHE_DIR, 'sandbox');
 
 let appDataLayoutReady = false;
 
-/** 确保 `~/.xhs-cli/.cache` 目录存在（幂等） */
+/** 确保 `~/.config/xhs-cli/.cache` 目录存在（幂等） */
 export function ensureAppDataLayout(): void {
   if (appDataLayoutReady) {
     return;

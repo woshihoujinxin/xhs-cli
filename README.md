@@ -29,7 +29,7 @@ xhs account use my-account
 xhs login
 ```
 
-`login` 成功后会自动把该账号记为**当前账号**。会话保存在 `~/.xhs-cli/.cache/accounts/<name>/browser-data`。
+`login` 成功后会自动把该账号记为**当前账号**。会话保存在 `~/.config/xhs-cli/.cache/accounts/<name>/browser-data`。
 
 ### 2. 发帖（填表）
 
@@ -84,7 +84,7 @@ xhs posted
 
 ## 数据目录
 
-默认路径：**`~/.xhs-cli/.cache/`**
+默认路径：**`~/.config/xhs-cli/.cache/`**
 
 | 路径 | 说明 |
 |------|------|
