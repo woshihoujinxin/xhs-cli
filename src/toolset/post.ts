@@ -52,6 +52,13 @@ async function waitAndClickPublish(page: Page): Promise<void> {
   // 发布按钮屏幕坐标(可通过 XHS_PUBLISH_X / XHS_PUBLISH_Y 环境变量覆盖,适配不同分辨率)
   const screenX = parseInt(process.env.XHS_PUBLISH_X ?? '934', 10);
   const screenY = parseInt(process.env.XHS_PUBLISH_Y ?? '983', 10);
+  // 坐标范围校验:防 NaN 或越界(0-4000)导致误点页面其他元素
+  if (!Number.isFinite(screenX) || !Number.isFinite(screenY) ||
+      screenX < 0 || screenX > 4000 || screenY < 0 || screenY > 4000) {
+    throw new Error(
+      `发布坐标非法 X=${screenX} Y=${screenY},请检查 XHS_PUBLISH_X/Y(应为 0-4000 的数字)`,
+    );
+  }
   // 屏幕 → viewport 转换:puppeteer mouse.click 用 viewport 坐标(相对浏览器内容区)
   // viewport = 屏幕坐标 - 窗口位置(screenX/Y) - 顶栏(outerHeight - innerHeight)
   const off = await page.evaluate(() => ({

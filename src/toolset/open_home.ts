@@ -38,6 +38,7 @@ export async function openHome(session: ResolvedSession, pageName: string = 'hom
   const child = spawn(chromePath, [
     `--user-data-dir=${userDataDir}`,
     '--remote-debugging-port=9222',
+    '--remote-debugging-address=127.0.0.1',   // 只绑本机,防局域网/DNS rebinding 窃取 Cookie
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-restore-session-state',

@@ -18,8 +18,15 @@ interface ExtractedNoteDetail {
   editorUrl: string;
 }
 
+// 小红书 noteId 格式:24 位十六进制(放宽到 8-32 位,兼容历史/特殊 ID)
+// 白名单校验,防 noteId 含 ../ 或特殊字符导致缓存路径遍历 / URL 注入
+const NOTE_ID_RE = /^[a-zA-Z0-9]{8,32}$/;
 function normalizeNoteId(noteId: string): string {
-  return noteId.trim();
+  const trimmed = noteId.trim();
+  if (!NOTE_ID_RE.test(trimmed)) {
+    throw new Error(`noteId 格式不合法(应为 8-32 位字母数字): ${trimmed.slice(0, 20)}`);
+  }
+  return trimmed;
 }
 
 function formatNoteDetail(noteId: string, detail: ExtractedNoteDetail): string {

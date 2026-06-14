@@ -302,9 +302,11 @@ export class XHSOperationDataFetcher {
  */
 export async function getOperationData(session: ResolvedSession): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
+  // 缓存版本号:改代码时 bump 这个数字,旧缓存自动失效(不用手动清缓存)
+  const CACHE_VERSION = 'v2';
   const cacheFilename = prefixedCacheFilename(
     session.cachePathPrefix,
-    `operation_data/${today}_text.json`,
+    `operation_data/${today}_${CACHE_VERSION}_text.json`,
   );
   const cached = loadFromCache<OperationDataTextCache>(cacheFilename);
   if (cached && cached.date === today && cached.text?.trim()) {

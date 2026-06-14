@@ -2,7 +2,7 @@
 
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'fs';
-import { join } from 'path';
+import { join, resolve, relative } from 'path';
 import { CACHE_DIR, ensureAppDataLayout } from '../config.js';
 
 
@@ -10,6 +10,21 @@ import { CACHE_DIR, ensureAppDataLayout } from '../config.js';
 interface CachedData<T> {
   data: T;
   cachedAt: string; // ISO 8601 格式的时间戳
+}
+
+
+/**
+ * 把 filename 解析到 CACHE_DIR 内的绝对路径,拒绝越界(防 ../ 路径遍历)。
+ * 所有 saveToCache/loadFromCache/cacheExists/removeCache 都应通过它。
+ */
+function resolveUnderCacheDir(filename: string): string {
+  const resolved = resolve(CACHE_DIR, filename);
+  const rel = relative(CACHE_DIR, resolved);
+  // rel 若以 '..' 开头或为绝对路径,说明 filename 试图越出 CACHE_DIR
+  if (rel.startsWith('..') || resolve(CACHE_DIR) === resolve(rel)) {
+    throw new Error(`缓存路径越界,拒绝访问: ${filename}`);
+  }
+  return resolved;
 }
 
 
@@ -22,22 +37,23 @@ export function ensureCacheDir(): void {
 // 保存数据到缓存文件（自动添加时间戳）
 export function saveToCache<T>(filename: string, data: T): void {
   ensureCacheDir();
-  const filePath = join(CACHE_DIR, filename);
-  const dirPath = join(CACHE_DIR, filename.split('/').slice(0, -1).join('/'));
+  const filePath = resolveUnderCacheDir(filename);
+  const dirPath = join(filePath, '..');
   if (dirPath !== CACHE_DIR && !existsSync(dirPath)) {
-    mkdirSync(dirPath, { recursive: true });
+    mkdirSync(dirPath, { recursive: true, mode: 0o700 });
   }
   const cached: CachedData<T> = {
     data: data,
     cachedAt: new Date().toISOString(),
   };
-  writeFileSync(filePath, JSON.stringify(cached, null, 2), 'utf8');
+  // 文件权限 0o600:仅所有者可读写,保护 Cookie/发布记录(Linux/macOS 生效,Windows 忽略)
+  writeFileSync(filePath, JSON.stringify(cached, null, 2), { encoding: 'utf8', mode: 0o600 });
 }
 
 
 // 从缓存文件读取数据（支持过期检查）,参数为秒
 export function loadFromCache<T>(filename: string, maxAge?: number): T | null {
-  const filePath = join(CACHE_DIR, filename);
+  const filePath = resolveUnderCacheDir(filename);
   if (!existsSync(filePath)) {
     return null;
   }
@@ -65,7 +81,7 @@ export function loadFromCache<T>(filename: string, maxAge?: number): T | null {
 
 // 检查缓存是否有效（基于时间）
 export function isCacheValid(filename: string, maxAge: number = 3600): boolean {
-  const filePath = join(CACHE_DIR, filename);
+  const filePath = resolveUnderCacheDir(filename);
   if (!existsSync(filePath)) {
     return false;
   }
@@ -80,7 +96,7 @@ export function isCacheValid(filename: string, maxAge: number = 3600): boolean {
 
 // 获取缓存文件的修改时间
 export function getCacheMtime(filename: string): Date | null {
-  const filePath = join(CACHE_DIR, filename);
+  const filePath = resolveUnderCacheDir(filename);
   if (!existsSync(filePath)) {
     return null;
   }
@@ -94,7 +110,7 @@ export function getCacheMtime(filename: string): Date | null {
 
 // 删除缓存文件
 export function removeCache(filename: string): boolean {
-  const filePath = join(CACHE_DIR, filename);
+  const filePath = resolveUnderCacheDir(filename);
   if (!existsSync(filePath)) {
     return false;
   }
@@ -134,6 +150,6 @@ export function listCacheFiles(): string[] {
 
 // 检查缓存文件是否存在
 export function cacheExists(filename: string): boolean {
-  const filePath = join(CACHE_DIR, filename);
+  const filePath = resolveUnderCacheDir(filename);
   return existsSync(filePath);
 }
