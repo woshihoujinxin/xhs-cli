@@ -7,7 +7,7 @@ import { BROWSER_USER_DATA_DIR, ensureAppDataLayout } from '../config.js';
 
 
 // 查找系统 Chrome 路径（跨平台支持）
-function findChromePath(): string | null {
+export function findChromePath(): string | null {
   if (process.env.CHROME_PATH && existsSync(process.env.CHROME_PATH)) {
     return process.env.CHROME_PATH;
   }
