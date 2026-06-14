@@ -26,7 +26,7 @@ interface OperationDataSnapshot {
   homePageVisitors: string;
   trafficSources: TrafficSourceRow[];
   fanInterests: string[];
-  tendencies: Array<{ metric: string; tendency: string; value: string }>;
+  tendencies: Array<{ metric: string; number: string; tendency: string; value: string }>;
 }
 
 /** 创作者首页单块指标 */
@@ -71,13 +71,15 @@ function formatOperationSnapshot(snapshot: OperationDataSnapshot): string {
   ];
 
   if (snapshot.tendencies.length > 0) {
-    lines.push('【首页指标趋势】');
+    lines.push('【首页指标】');
     for (const t of snapshot.tendencies) {
       const dir =
-        t.tendency === 'up' ? '↑' : t.tendency === 'down' ? '↓' : '—';
-      // 无趋势值(持平/未开始)时只显示方向,不显示占位 --
+        t.tendency === 'up' ? '↑' : t.tendency === 'down' ? '↓' : '';
+      // 数值 + 环比(无环比只显示数值)
       const valuePart = t.value && t.value !== '--' ? ` ${t.value}` : '';
-      lines.push(`  ${t.metric}: ${dir}${valuePart}`);
+      const trendStr = dir ? `${dir}${valuePart}` : '';
+      const sep = trendStr ? '  ' : '';
+      lines.push(`  ${t.metric}: ${t.number}${sep}${trendStr}`);
     }
     lines.push('');
   }
@@ -178,7 +180,13 @@ export class XHSOperationDataFetcher {
           }
           return {
             title: (titleEl.textContent || '').trim(),
-            number: (numberEl.textContent || '').trim() || '0',
+            // number 可能带逗号(2,715),且 .number-container 里可能有 .unit(%)
+            number: (() => {
+              const num = (numberEl.textContent || '').trim() || '0';
+              const unitEl = block.querySelector('.unit');
+              const unit = unitEl ? (unitEl.textContent || '').trim() : '';
+              return num + unit;
+            })(),
             tendency,
             tendencyValue,
           };
@@ -280,6 +288,7 @@ export class XHSOperationDataFetcher {
       fanInterests: fanData.interests,
       tendencies: homeData.map((item) => ({
         metric: item.title,
+        number: item.number,
         tendency: item.tendency,
         value: item.tendencyValue,
       })),
