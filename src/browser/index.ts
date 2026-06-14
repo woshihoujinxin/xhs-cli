@@ -53,8 +53,18 @@ export function getUserDataDir(override?: string): string {
 
 const PROFILE_IN_USE_RE = /already running for/i;
 
-/** 同一 userDataDir 已有 Chrome 时，通过 DevTools 端口复用实例（常见于 post 后 disconnect 未关窗） */
+/** 同一 userDataDir 已有 Chrome 时，通过 DevTools 端口复用实例（常见于 home/post 后未关窗） */
 async function connectToRunningBrowser(userDataDir: string): Promise<Browser | null> {
+  // 1. 优先试 home 命令开的固定端口 9222(快速,Chrome 启动时 --remote-debugging-port=9222)
+  try {
+    return await puppeteer.connect({
+      browserURL: 'http://127.0.0.1:9222',
+      defaultViewport: null,
+    });
+  } catch {
+    // 9222 没开,继续读 DevToolsActivePort 文件
+  }
+  // 2. 兜底:读 userDataDir/DevToolsActivePort 文件拿端口
   const portFile = join(userDataDir, 'DevToolsActivePort');
   if (!existsSync(portFile)) {
     return null;
@@ -142,12 +152,15 @@ export async function launchBrowser(
   try {
     return await puppeteer.launch(launchOptions);
   } catch (error) {
+    // launch 失败时,先尝试复用已运行的浏览器(home 命令开 / 手动开 / 上次没关)
+    // 读 userDataDir/DevToolsActivePort,通过 CDP 连接。跨平台兜底
+    // (Windows 上 launch 占用错误信息不匹配 PROFILE_IN_USE_RE,不能只靠正则判断)
+    const existing = await connectToRunningBrowser(userDataDir);
+    if (existing) {
+      return existing;
+    }
     if (error instanceof Error) {
       if (PROFILE_IN_USE_RE.test(error.message)) {
-        const existing = await connectToRunningBrowser(userDataDir);
-        if (existing) {
-          return existing;
-        }
         throw profileInUseError(userDataDir);
       }
       if (error.message.includes('Executable doesn\'t exist') || error.message.includes('Could not find browser')) {

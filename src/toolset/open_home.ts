@@ -32,8 +32,12 @@ export async function openHome(session: ResolvedSession, pageName: string = 'hom
 
   // detached 启动,stdio 完全 ignore,unref 让父进程(node)不等待
   // 结果:Chrome 是独立进程,node 退出后 Chrome 继续运行
+  // --remote-debugging-port=9222:开 CDP 端口,Chrome 会写 DevToolsActivePort 文件,
+  //   之后 recent/metrics/post 等命令遇到 userDataDir 被占时,
+  //   connectToRunningBrowser 能读到端口并通过 CDP 复用此浏览器,而非冲突报错
   const child = spawn(chromePath, [
     `--user-data-dir=${userDataDir}`,
+    '--remote-debugging-port=9222',
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-restore-session-state',
