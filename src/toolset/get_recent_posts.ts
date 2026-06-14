@@ -73,11 +73,52 @@ async function scrapeRecentPosts(
   await new Promise((r) => setTimeout(r, 4000));
 
   // 新版小红书创作者后台:笔记卡片是 .note-card(旧版 div.note 已随改版失效)
+  // 分页机制:笔记列表在 .content 容器内,滚动到底部触发 .bottom-loading 加载更多
+  // 总数:页面底部 .bottom-loading 文本 "- 共N篇笔记 -"
+
+  // 1. 先解析总数
+  const totalCount = await page.evaluate(() => {
+    const blocks = document.querySelectorAll('.bottom-loading, [class*="bottom-loading"]');
+    for (const b of blocks) {
+      const m = (b.textContent || '').match(/共\s*(\d+)\s*篇/);
+      if (m) return parseInt(m[1], 10);
+    }
+    // 兜底:全文搜
+    const all = document.body.textContent || '';
+    const m = all.match(/共\s*(\d+)\s*篇笔记/);
+    return m ? parseInt(m[1], 10) : null;
+  });
+
+  // 2. 滚动加载,直到拿够 limit 或没有更多
+  //    滚动容器是 .content(不是 window);limit 未指定时,加载全部(最多 200 条防死循环)
+  const effectiveLimit = typeof limit === 'number' ? limit : (totalCount ?? 200);
+  let lastCount = 0;
+  let stableRounds = 0;
+  while (true) {
+    const curCount = await page.evaluate(() => document.querySelectorAll('.note-card').length);
+    if (curCount >= effectiveLimit) break;
+    if (curCount === lastCount) {
+      stableRounds++;
+      // 连续 3 次滚动数量没变 = 加载完了
+      if (stableRounds >= 3) break;
+    } else {
+      stableRounds = 0;
+    }
+    lastCount = curCount;
+    // 滚动 .content 到底部(无限加载触发点)
+    await page.evaluate(() => {
+      const c = document.querySelector('.content');
+      if (c) c.scrollTop = c.scrollHeight;
+      window.scrollTo(0, document.body.scrollHeight);
+    });
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+
   const noteCards = await page.$$('.note-card');
   const results: NoteRaw[] = [];
 
   for (const card of noteCards) {
-    if (typeof limit === 'number' && results.length >= limit) break;
+    if (results.length >= effectiveLimit) break;
 
     const data = await page.evaluate((el) => {
       const raw = el.getAttribute('data-impression');
@@ -132,7 +173,14 @@ async function scrapeRecentPosts(
   }
 
   if (results.length === 0) return '未找到笔记数据';
-  return results.map(formatNote).join('\n\n');
+  // 头部:共 X 篇 + 本次显示 Y 篇(仅当 limit 指定或总数与显示数不一致时显示)
+  const headerParts: string[] = [];
+  if (totalCount !== null) headerParts.push(`共 ${totalCount} 篇`);
+  if (typeof limit === 'number' || (totalCount !== null && results.length < totalCount)) {
+    headerParts.push(`显示 ${results.length} 篇`);
+  }
+  const header = headerParts.length > 0 ? headerParts.join(' · ') + '\n\n' : '';
+  return header + results.map(formatNote).join('\n\n');
 }
 
 export async function getRecentPosts(
