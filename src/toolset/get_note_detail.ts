@@ -128,6 +128,16 @@ export async function getNoteDetail(
     return `未找到笔记详情: ${id}`;
   }
 
+  // 编辑页(/publish/update)通常不显示发布时间——它是改内容用的,不是看元数据
+  // 兜底:从 recent 缓存(notes/{id}.json,跑过 xhs recent 就有)读 publishTime
+  if (!detail.publishTime) {
+    const recentCacheKey = prefixedCacheFilename(session.cachePathPrefix, `notes/${id}.json`);
+    const recentData = loadFromCache<{ publishTime?: string }>(recentCacheKey);
+    if (recentData?.publishTime) {
+      detail.publishTime = recentData.publishTime;
+    }
+  }
+
   const text = formatNoteDetail(id, detail);
   saveToCache(cacheFilename, {
     text,

@@ -74,33 +74,52 @@ async function scrapeRecentPosts(
 
   // 新版小红书创作者后台:笔记卡片是 .note-card(旧版 div.note 已随改版失效)
   // 分页机制:笔记列表在 .content 容器内,滚动到底部触发 .bottom-loading 加载更多
-  // 总数:页面底部 .bottom-loading 文本 "- 共N篇笔记 -"
+  // 总数:在 tab 标签里,"全部 N"(.tab-item--active 文本含数字)
 
-  // 1. 先解析总数
+  // 1. 解析总数:从"全部 N"tab 取数字(最准)
   const totalCount = await page.evaluate(() => {
+    // 优先:含"全部"的 tab 文本里的数字
+    const tabs = document.querySelectorAll('.tab-item, [class*="tab-item"]');
+    for (const t of tabs) {
+      const text = (t.textContent || '').trim();
+      if (text.includes('全部')) {
+        const m = text.match(/(\d+)/);
+        if (m) return parseInt(m[1], 10);
+      }
+    }
+    // 兜底 1:.bottom-loading 的"共N篇"
     const blocks = document.querySelectorAll('.bottom-loading, [class*="bottom-loading"]');
     for (const b of blocks) {
       const m = (b.textContent || '').match(/共\s*(\d+)\s*篇/);
       if (m) return parseInt(m[1], 10);
     }
-    // 兜底:全文搜
+    // 兜底 2:全文"共N篇笔记"
     const all = document.body.textContent || '';
     const m = all.match(/共\s*(\d+)\s*篇笔记/);
     return m ? parseInt(m[1], 10) : null;
   });
 
-  // 2. 滚动加载,直到拿够 limit 或没有更多
-  //    滚动容器是 .content(不是 window);limit 未指定时,加载全部(最多 200 条防死循环)
-  const effectiveLimit = typeof limit === 'number' ? limit : (totalCount ?? 200);
+  // 2. 滚动加载,直到拿够 limit 或加载完
+  //    滚动容器是 .content;limit 未指定时加载全部(最多 500 条防死循环)
+  const effectiveLimit = typeof limit === 'number' ? limit : (totalCount ?? 500);
   let lastCount = 0;
   let stableRounds = 0;
-  while (true) {
+  const MAX_ROUNDS = 50;  // 最多滚动 50 次防死循环
+  for (let round = 0; round < MAX_ROUNDS; round++) {
     const curCount = await page.evaluate(() => document.querySelectorAll('.note-card').length);
     if (curCount >= effectiveLimit) break;
+    // 检查 .bottom-loading 是否显示"已加载全部/没有更多"
+    const loadingDone = await page.evaluate(() => {
+      const b = document.querySelector('.bottom-loading, [class*="bottom-loading"]');
+      if (!b) return false;
+      const t = (b.textContent || '').trim();
+      return /已加载全部|没有更多|已全部加载|没有更多笔记/.test(t);
+    });
+    if (loadingDone) break;
     if (curCount === lastCount) {
       stableRounds++;
-      // 连续 3 次滚动数量没变 = 加载完了
-      if (stableRounds >= 3) break;
+      // 连续 5 次滚动数量没变 + 不在加载中 = 加载完了(5 次容忍慢加载)
+      if (stableRounds >= 5) break;
     } else {
       stableRounds = 0;
     }
@@ -111,7 +130,7 @@ async function scrapeRecentPosts(
       if (c) c.scrollTop = c.scrollHeight;
       window.scrollTo(0, document.body.scrollHeight);
     });
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 2000));
   }
 
   const noteCards = await page.$$('.note-card');
