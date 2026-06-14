@@ -75,7 +75,9 @@ function formatOperationSnapshot(snapshot: OperationDataSnapshot): string {
     for (const t of snapshot.tendencies) {
       const dir =
         t.tendency === 'up' ? '↑' : t.tendency === 'down' ? '↓' : '—';
-      lines.push(`  ${t.metric}: ${dir} ${t.value}`);
+      // 无趋势值(持平/未开始)时只显示方向,不显示占位 --
+      const valuePart = t.value && t.value !== '--' ? ` ${t.value}` : '';
+      lines.push(`  ${t.metric}: ${dir}${valuePart}`);
     }
     lines.push('');
   }
@@ -109,12 +111,44 @@ export class XHSOperationDataFetcher {
   }
 
   // 新版创作者后台 home 页不再显示"笔记数"指标,改去 note-manager 页数 .note-card 数量
+  // 优先从"全部 N"tab 取总数(tab 文本,最准);兜底用滚动加载后数 .note-card
   async fetchPublishedNotesCount(): Promise<string> {
     try {
       await this.navigate('https://creator.xiaohongshu.com/new/note-manager');
-      await new Promise((r) => setTimeout(r, 3000));
-      const count = await this.page.evaluate(() => document.querySelectorAll('.note-card').length);
-      return String(count);
+      await new Promise((r) => setTimeout(r, 4000));
+      // 1. 优先从 tab 解析总数("全部 N")
+      const fromTab = await this.page.evaluate(() => {
+        const tabs = document.querySelectorAll('.tab-item, [class*="tab-item"]');
+        for (const t of tabs) {
+          const text = (t.textContent || '').trim();
+          if (text.includes('全部')) {
+            const m = text.match(/(\d+)/);
+            if (m) return parseInt(m[1], 10);
+          }
+        }
+        return null;
+      });
+      if (fromTab !== null) return String(fromTab);
+      // 2. 兜底:滚动加载全部后数 .note-card
+      let lastCount = 0;
+      let stableRounds = 0;
+      for (let round = 0; round < 30; round++) {
+        const curCount = await this.page.evaluate(() => document.querySelectorAll('.note-card').length);
+        if (curCount === lastCount) {
+          stableRounds++;
+          if (stableRounds >= 4) return String(curCount);
+        } else {
+          stableRounds = 0;
+        }
+        lastCount = curCount;
+        await this.page.evaluate(() => {
+          const c = document.querySelector('.content');
+          if (c) c.scrollTop = c.scrollHeight;
+        });
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      const finalCount = await this.page.evaluate(() => document.querySelectorAll('.note-card').length);
+      return String(finalCount);
     } catch {
       return '—';
     }
@@ -132,7 +166,9 @@ export class XHSOperationDataFetcher {
           let tendency: 'up' | 'down' | 'none' = 'none';
           let tendencyValue = '--';
           if (tendencyEl) {
-            const tendencyNumberEl = tendencyEl.querySelector('.tendency-number');
+            // 新版 DOM 有两个 .tendency-number:.text("环比"标签)和 .up/.down(真实数值)
+            // 要抓带方向 class 的那个,不是第一个 .text
+            const tendencyNumberEl = tendencyEl.querySelector('.tendency-number.up, .tendency-number.down');
             if (tendencyNumberEl) {
               tendencyValue = (tendencyNumberEl.textContent || '').trim() || '--';
               const classList = Array.from(tendencyNumberEl.classList);
