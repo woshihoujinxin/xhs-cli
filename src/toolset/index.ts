@@ -7,6 +7,7 @@ import { getNoteDetail } from './get_note_detail.js';
 import { formatUserProfileText } from './get_profile.js';
 import { getRecentPosts } from './get_recent_posts.js';
 import { postNote, type PostNoteArgs } from './post.js';
+import { postLongText, type PostLongTextArgs } from './postLongText.js';
 import { openHome } from './open_home.js';
 import { resolveAccountSlug, resolveSession } from './sessionResolve.js';
 import type { ResolvedSession } from './sessionTypes.js';
@@ -51,6 +52,15 @@ export async function implGetNoteDetail(
 export async function implPost(args: PostNoteArgs): Promise<string> {
   try {
     const result = await postNote(args);
+    return result.success ? `✅ ${result.message}` : `❌ ${result.message}`;
+  } catch (e) {
+    return `❌ ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+export async function implPostLongText(args: PostLongTextArgs): Promise<string> {
+  try {
+    const result = await postLongText(args);
     return result.success ? `✅ ${result.message}` : `❌ ${result.message}`;
   } catch (e) {
     return `❌ ${e instanceof Error ? e.message : String(e)}`;

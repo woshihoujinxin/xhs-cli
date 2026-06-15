@@ -9,6 +9,7 @@ import {
   implPosted,
   implGetNoteDetail,
   implPost,
+  implPostLongText,
   implOpenHome,
   resolveSession,
 } from '../toolset/index.js';
@@ -57,6 +58,10 @@ function printHelp(): void {
   xhs detail <noteId> [--account <name>]
   xhs post (--title <标题> (--content <正文> | --content-file <路径>))
               [--image <路径>]... [--publish | --publish=true|false] [--account <name>]
+
+  # 长文/文章(正文自动渲染成图片,无需本地图)
+  xhs longtext (--title <标题> (--content <markdown 正文> | --content-file <路径> | --md-file <markdown路径>))
+              [--publish | --publish=true|false] [--account <name>]
 
   # 账号（配置存 ~/.config/xhs-cli/.cache/accounts/registry.json ，每账号独立 browser-data）
   xhs account list
@@ -296,6 +301,44 @@ export async function runOneCommand(argv: string[]): Promise<void> {
         title,
         content,
         imagePaths,
+        publish: resolvePostPublish(opts, flags),
+        browserUserDataDir: session.browserUserDataDir,
+      }),
+    );
+    return;
+  }
+
+  if (cmd === 'longtext' || cmd === 'post-longtext') {
+    const { opts, flags, rest } = parseOpts(tail);
+    if (rest.length > 0) {
+      die('❌ 用法: longtext --title <标题> (--content <正文> | --content-file <路径> | --md-file <markdown路径>) [--publish] [--account <name>]');
+    }
+    const session = resolveSessionCli(accountFromOpts(opts));
+    const title = opts.title?.trim();
+    if (!title) {
+      die('❌ longtext 需要 --title <标题>');
+    }
+    // --md-file 优先：走编辑器「从文件导入」流程（小红书按 markdown 结构渲染）
+    const mdFile = opts['md-file']?.trim();
+    let content = opts.content ?? '';
+    if (opts['content-file']) {
+      const p = opts['content-file'];
+      if (!existsSync(p)) {
+        die(`❌ 找不到文件: ${p}`);
+      }
+      content = readFileSync(p, 'utf-8');
+    }
+    if (!mdFile && !content.trim()) {
+      die('❌ 请提供 --content、--content-file 或 --md-file');
+    }
+    if (mdFile && !existsSync(mdFile)) {
+      die(`❌ 找不到 markdown 文件: ${mdFile}`);
+    }
+    console.log(
+      await implPostLongText({
+        title,
+        content,
+        mdFile: mdFile || undefined,
         publish: resolvePostPublish(opts, flags),
         browserUserDataDir: session.browserUserDataDir,
       }),

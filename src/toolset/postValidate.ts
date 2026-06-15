@@ -45,6 +45,39 @@ export function validatePostParams(params: PostNoteParams): void {
   }
 }
 
+export type ArticlePostParams = {
+  title: string;
+  content: string;
+};
+
+/**
+ * 文章（长文）发布参数校验。
+ *
+ * 与图文笔记不同：文章支持更长的正文，且由小红书后端把正文渲染成图片，
+ * 因此无需本地图片。这里只做基础校验（非空 + 安全上限）；具体长度上限
+ * 由小红书后端决定，超长时由页面/接口报错，CLI 侧不硬性截断正文。
+ */
+export function validateArticleParams(params: ArticlePostParams): void {
+  if (typeof params.title !== 'string') {
+    throw new Error('标题(title)必须是字符串');
+  }
+  if (!params.title.trim()) {
+    throw new Error('标题(title)不能为空');
+  }
+  if (params.title.length > 200) {
+    throw new Error('标题过长(超过 200 字符安全上限)');
+  }
+  if (typeof params.content !== 'string') {
+    throw new Error('内容(content)必须是字符串');
+  }
+  if (!params.content.trim()) {
+    throw new Error('内容(content)不能为空');
+  }
+  if (params.content.length > 100000) {
+    throw new Error('正文过长(超过 100000 字符安全上限,请分段)');
+  }
+}
+
 export function validateImagePaths(imagePaths: string[]): void {
   if (imagePaths.length === 0) {
     throw new Error('至少需要一张图片');

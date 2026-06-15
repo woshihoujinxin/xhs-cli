@@ -92,7 +92,9 @@ describe('resolveAccountSlug', () => {
     addStoredAccount({ name: 'u1' });
     const s = resolveSession();
     assert.equal(s.account, 'u1');
-    assert.match(s.browserUserDataDir, /accounts\/u1\/browser-data$/);
+    // browserUserDataDir 由 path.join 生成，Windows 为反斜杠、POSIX 为正斜杠，两种都接受
+    assert.match(s.browserUserDataDir, /accounts[\\/]u1[\\/]browser-data$/);
+    // cachePathPrefix 是字面模板字符串（非 path.join），恒为正斜杠
     assert.equal(s.cachePathPrefix, 'accounts/u1/');
   });
 });
