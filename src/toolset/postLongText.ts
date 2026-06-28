@@ -41,6 +41,11 @@ export type PostLongTextArgs = {
    * content 字段会被忽略。
    */
   mdFile?: string;
+  /**
+   * 可选：进入常规发布页后在正文区填写的描述/关键词（长尾搜索流量来源）。
+   * 提供时会在「下一步」之后、「发布」之前填入常规发布页的正文编辑器。
+   */
+  description?: string;
   /** 为 true 时自动点「下一步」→ 等转换 → 点「发布」；默认 false，仅填表并停在编辑器 */
   publish?: boolean;
   /** 为 true 时使用无头 Chrome；也可用环境变量 XHS_HEADLESS=1 */
@@ -407,6 +412,52 @@ export async function postLongText(
       pollMs: 10000,
     });
     console.error(`   下一步点击方式: ${nextBy.by}`);
+
+    // ⑤.5 [可选] 在常规发布页正文区填入描述/关键词（长尾搜索流量）
+    // 常规发布页与 post(图文) 是同一个页面，直接用 post.ts 已验证的填正文手法。
+    // 关键：点「下一步」后有页面跳转，ProseMirror 需要额外时间初始化，
+    // 必须在编辑器 DOM 出现后等它完全就绪再填，否则 ProseMirror 后初始化会覆盖。
+    if (args.description?.trim()) {
+      console.error('⑤.5 在常规发布页填入正文描述…');
+      // 等正文编辑器在 DOM 中出现
+      let editorReady = false;
+      for (let i = 0; i < 30; i++) {
+        const found = await page.evaluate(() => {
+          return !!document.querySelector(
+            'div.tiptap.ProseMirror[contenteditable="true"]',
+          );
+        });
+        if (found) { editorReady = true; break; }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      if (!editorReady) {
+        console.error('   ⚠️ 正文编辑器未出现，跳过描述填入');
+      } else {
+        // ProseMirror DOM 有了但 JS 可能还在初始化，等 3s 让它完全就绪
+        await new Promise((r) => setTimeout(r, 3000));
+        // 用 puppeteer click 把焦点真正落到编辑器（比 JS focus() 更可靠）
+        try {
+          await page.click('div.tiptap.ProseMirror[contenteditable="true"]');
+        } catch {
+          // 点击失败继续
+        }
+        await new Promise((r) => setTimeout(r, 500));
+        // 与 post.ts 填正文完全一致
+        await page.evaluate((text: string) => {
+          const editor = document.querySelector(
+            'div.tiptap.ProseMirror[contenteditable="true"]',
+          ) as HTMLElement;
+          if (!editor) return;
+          editor.focus();
+          editor.innerHTML = '';
+          const textNode = document.createTextNode(text);
+          editor.appendChild(textNode);
+          editor.dispatchEvent(new Event('input', { bubbles: true }));
+          editor.dispatchEvent(new Event('change', { bubbles: true }));
+        }, args.description);
+        console.error('   描述已填入(与 post 图文同一手法)');
+      }
+    }
 
     // ⑥ 进入常规发布页，点「发布」(轮询等按钮渲染；跳转后即出现，无需额外 sleep)
     console.error('⑥ 点击「发布」(常规发布页，轮询等待)…');

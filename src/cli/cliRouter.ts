@@ -61,7 +61,7 @@ function printHelp(): void {
 
   # 长文/文章(正文自动渲染成图片,无需本地图)
   xhs longtext (--title <标题> (--content <markdown 正文> | --content-file <路径> | --md-file <markdown路径>))
-              [--publish | --publish=true|false] [--account <name>]
+              [--description <描述> | --description-file <路径>] [--publish | --publish=true|false] [--account <name>]
 
   # 账号（配置存 ~/.config/xhs-cli/.cache/accounts/registry.json ，每账号独立 browser-data）
   xhs account list
@@ -311,7 +311,7 @@ export async function runOneCommand(argv: string[]): Promise<void> {
   if (cmd === 'longtext' || cmd === 'post-longtext') {
     const { opts, flags, rest } = parseOpts(tail);
     if (rest.length > 0) {
-      die('❌ 用法: longtext --title <标题> (--content <正文> | --content-file <路径> | --md-file <markdown路径>) [--publish] [--account <name>]');
+      die('❌ 用法: longtext --title <标题> (--content <正文> | --content-file <路径> | --md-file <markdown路径>) [--description <描述> | --description-file <路径>] [--publish] [--account <name>]');
     }
     const session = resolveSessionCli(accountFromOpts(opts));
     const title = opts.title?.trim();
@@ -334,11 +334,21 @@ export async function runOneCommand(argv: string[]): Promise<void> {
     if (mdFile && !existsSync(mdFile)) {
       die(`❌ 找不到 markdown 文件: ${mdFile}`);
     }
+    // --description / --description-file: 进入常规发布页后在正文区填的关键词/描述
+    let description = opts.description ?? '';
+    if (opts['description-file']) {
+      const p = opts['description-file'];
+      if (!existsSync(p)) {
+        die(`❌ 找不到描述文件: ${p}`);
+      }
+      description = readFileSync(p, 'utf-8');
+    }
     console.log(
       await implPostLongText({
         title,
         content,
         mdFile: mdFile || undefined,
+        description: description.trim() || undefined,
         publish: resolvePostPublish(opts, flags),
         browserUserDataDir: session.browserUserDataDir,
       }),

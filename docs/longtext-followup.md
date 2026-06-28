@@ -48,6 +48,8 @@
     ↓  页面异步渲染
 ⑤ 点「下一步」    (轮询 pollMs 等按钮出现)
     ↓  跳转到常规发布页
+⑤.5 [可选] 填正文描述   (等 ProseMirror 编辑器出现,fillContent 输入)
+    ↓
 ⑥ 点「发布」      (轮询 pollMs 等按钮出现)
 ```
 
@@ -64,12 +66,17 @@
 ## CLI 用法
 
 ```bash
-# 推荐：导入 markdown 文件（保留标题/列表/代码块等结构）
-xhs longtext --title "标题" --md-file path/to/article.md --publish
+# 推荐：导入 markdown 文件 + 在发布页正文区追加 SEO 关键词
+xhs longtext --title "标题" --md-file path/to/article.md \
+    --description "核心关键词 + 引导文案，用于长尾搜索流量" \
+    --publish
 
-# 纯文本正文（markdown 符号会字面显示）
+# 纯文本正文
 xhs longtext --title "标题" --content "正文内容" --publish
-xhs longtext --title "标题" --content-file path/to/text.txt --publish
+
+# 从文件读描述（描述较长时用）
+xhs longtext --title "标题" --md-file article.md \
+    --description-file path/to/seo-desc.txt --publish
 ```
 
 ## 进程退出策略
