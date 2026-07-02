@@ -51,7 +51,7 @@ async function getLatestVersion(): Promise<string | null> {
       controller.abort();
     }, 3000); // 3秒超时
     try {
-      const response = await fetch('https://registry.npmjs.org/xhs-cli/latest', {
+      const response = await fetch('https://registry.npmjs.org/@easyasstudio%2Fxhs-cli/latest', {
         headers: {
           'Accept': 'application/json',
         },
@@ -103,7 +103,7 @@ export async function checkVersionUpdate(): Promise<void> {
       console.error('\n📦 发现新版本！');
       console.error(`   当前版本: ${currentVersion}`);
       console.error(`   最新版本: ${latestVersion}`);
-      console.error(`   更新命令: PUPPETEER_SKIP_DOWNLOAD=true npm install -g xhs-cli@latest\n`);
+      console.error(`   更新命令: npm install -g @easyasstudio/xhs-cli@latest\n`);
     }
   } catch (error) {
     // 静默失败，不影响主流程

@@ -94,9 +94,9 @@ jobs:
         if: ${{ steps.npm_gate.outputs.publish == 'true' }}
         run: |
           version="${{ steps.version.outputs.target }}"
-          if npm view "xhs-cli@${version}" version --registry=https://registry.npmjs.org/ >/dev/null 2>&1; then
+          if npm view "@easyasstudio/xhs-cli@${version}" version --registry=https://registry.npmjs.org/ >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "xhs-cli ${version} is already published; skipping npm publish."
+            echo "@easyasstudio/xhs-cli ${version} is already published; skipping npm publish."
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
@@ -117,11 +117,11 @@ jobs:
           set -euo pipefail
           target="${{ steps.version.outputs.target }}"
           for attempt in $(seq 1 10); do
-            if npm view "xhs-cli@${target}" version dist-tags --json --registry=https://registry.npmjs.org/; then
+            if npm view "@easyasstudio/xhs-cli@${target}" version dist-tags --json --registry=https://registry.npmjs.org/; then
               exit 0
             fi
-            echo "npm registry has not exposed xhs-cli@${target} yet (attempt ${attempt}/10); retrying in 6s..."
+            echo "npm registry has not exposed @easyasstudio/xhs-cli@${target} yet (attempt ${attempt}/10); retrying in 6s..."
             sleep 6
           done
-          echo "Timed out waiting for xhs-cli@${target} to appear in npm view" >&2
+          echo "Timed out waiting for @easyasstudio/xhs-cli@${target} to appear in npm view" >&2
           exit 1

@@ -34,8 +34,6 @@ export const PUBLISHED_ROOT = join(CACHE_DIR, 'published');
 
 // 笔记缓存目录
 export const NOTES_CACHE_DIR = join(CACHE_DIR, 'notes');
-// 浏览器 cookie 文件
-export const COOKIE_FILE = join(CACHE_DIR, 'cookies', 'cookies.json');
 /** 可选：用户或外部工具自行使用的目录 */
 export const SANDBOX_DIR = join(CACHE_DIR, 'sandbox');
 
@@ -67,7 +65,7 @@ export function resetAppDataLayoutCacheForTests(): void {
 export const CACHE_TTL_OPERATION_DATA = 24 * 60 * 60; // 86400 秒 = 24小时
 
 // 笔记统计缓存时间
-export const CACHE_TTL_NOTE_STATISTICS = 24 * 60 * 60; // 24天
+export const CACHE_TTL_NOTE_STATISTICS = 24 * 60 * 60; // 24 小时
 
 // 笔记详情缓存时间
 export const CACHE_TTL_NOTE_DETAIL = 30 * 24 * 60 * 60; // 30天

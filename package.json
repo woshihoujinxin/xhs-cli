@@ -1,6 +1,6 @@
 {
   "name": "@easyasstudio/xhs-cli",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "小红书创作者 CLI(fork: 配置目录统一到 ~/.config/xhs-cli,与 xianyu-auto skill 约定一致)",
   "type": "module",
   "main": "dist/cli/index.js",
@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsc",
     "build:test": "tsc -p tsconfig.test.json",
-    "test": "npm run build && npm run build:test && find dist-test -name '*.test.js' -print0 | xargs -0 node --test",
+    "test": "npm run build && npm run build:test && node scripts/run-tests.mjs",
     "postpublish": "git checkout README.md",
     "dev": "npm run build && node dist/cli/index.js help",
     "deploy": "node scripts/deploy.mjs"
@@ -29,10 +29,7 @@
     "content-creator",
     "social-media",
     "automation",
-    "cli",
-    "crawler",
-    "cover-generation",
-    "image-generation"
+    "cli"
   ],
   "author": "Joo <1546635571@qq.com> (original); fork maintained by woshihoujinxin",
   "license": "GPL-3.0",

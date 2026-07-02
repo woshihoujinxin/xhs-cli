@@ -20,7 +20,7 @@ It is **not** an agent or MCP server. Subcommands in `src/cli/cliRouter.ts` call
 | Run the CLI after build | `node dist/cli/index.js help` (or `npm run dev`) |
 | Deploy the landing site (unrelated to CLI) | `npm run deploy` (needs `.env.deploy`) |
 
-There is **no lint/format step** configured — do not invent one. Tests use the **Node built-in runner** (`node:test` + `node:assert`), not Jest/Vitest. Tests import compiled JS from `dist/` / `dist-test/`, so building first is mandatory; the full `npm test` pipeline is `find dist-test -name '*.test.js' -print0 | xargs -0 node --test` (needs bash; this project runs under bash on Windows).
+There is **no lint/format step** configured — do not invent one. Tests use the **Node built-in runner** (`node:test` + `node:assert`), not Jest/Vitest. Tests import compiled JS from `dist/` / `dist-test/`, so building first is mandatory; `npm test` runs `node scripts/run-tests.mjs` (cross-platform).
 
 ## Module system & TypeScript
 

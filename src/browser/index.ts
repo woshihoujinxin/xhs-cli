@@ -55,16 +55,7 @@ const PROFILE_IN_USE_RE = /already running for/i;
 
 /** 同一 userDataDir 已有 Chrome 时，通过 DevTools 端口复用实例（常见于 home/post 后未关窗） */
 async function connectToRunningBrowser(userDataDir: string): Promise<Browser | null> {
-  // 1. 优先试 home 命令开的固定端口 9222(快速,Chrome 启动时 --remote-debugging-port=9222)
-  try {
-    return await puppeteer.connect({
-      browserURL: 'http://127.0.0.1:9222',
-      defaultViewport: null,
-    });
-  } catch {
-    // 9222 没开,继续读 DevToolsActivePort 文件
-  }
-  // 2. 兜底:读 userDataDir/DevToolsActivePort 文件拿端口
+  // 只读该账号 userDataDir 下的 DevToolsActivePort，避免误连其它账号在 9222 上的 Chrome
   const portFile = join(userDataDir, 'DevToolsActivePort');
   if (!existsSync(portFile)) {
     return null;
@@ -190,7 +181,7 @@ export async function createLoggedInPage(
   const isLoginPage = currentUrl.includes('/login') || currentUrl.includes('/signin');
   if (isLoginPage) {
     await browser.close();
-    throw new Error('未登录，请先运行 npm run cli login 进行登录');
+    throw new Error('未登录，请先运行 xhs login 进行登录');
   }
   return page;
 }
@@ -228,7 +219,7 @@ export async function withLoggedInPage<T>(
     const currentUrl = page.url();
     const isLoginPage = currentUrl.includes('/login') || currentUrl.includes('/signin');
     if (isLoginPage) {
-      throw new Error('未登录，请先运行 npm run cli login 进行登录');
+      throw new Error('未登录，请先运行 xhs login 进行登录');
     }
     return await callback(page);
   } finally {

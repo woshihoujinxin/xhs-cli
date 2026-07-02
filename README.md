@@ -1,6 +1,6 @@
 # xhs-cli
 
-在终端里使用的小红书工具：**登录**、**创作者指标**、**创作者后台已发笔记**（`recent`）、**单篇笔记详情**（`detail`）、**本地发帖归档**（`posted`），以及用**标题 + 正文 + 本地图片路径**在创作后台填表发帖（`post`，需本机 Chrome/Chromium）。
+在终端里使用的小红书工具：**登录**、**创作者指标**、**创作者后台已发笔记**（`recent`）、**单篇笔记详情**（`detail`）、**本地发帖归档**（`posted`）、**图文发帖**（`post`）与**长文/文章发帖**（`longtext`，需本机 Chrome/Chromium）。
 
 支持**多账号隔离**（每账号独立浏览器会话目录），适合与 Agent 或自动化流程编排配合；发帖仍以**本地人机确认**为前提。
 
@@ -44,7 +44,28 @@ xhs post \
 - 默认只填表，**不会**自动点击发布；加 `--publish` 会在填表后尝试点击页面「发布」按钮。
 - 临时操作其他账号：`--account other`。
 
-### 3. 查看数据
+### 3. 长文发帖（文章，无需本地图片）
+
+```bash
+xhs longtext \
+  --title "标题" \
+  --md-file ./article.md \
+  --description "发布页正文区的 SEO 关键词（可选）"
+```
+
+- 也可用 `--content` / `--content-file` 直接填 markdown 正文。
+- `--publish` 会自动点「一键排版/下一步」→ 等转换 → 点「发布」。
+
+### 4. 打开创作者后台（保持 Chrome 窗口）
+
+```bash
+xhs home
+xhs home note-manager
+```
+
+`home` 会启动独立 Chrome 并绑定当前账号会话；后续 `metrics`/`post` 等命令可复用该窗口。
+
+### 5. 查看数据
 
 ```bash
 xhs metrics
@@ -80,7 +101,9 @@ xhs posted
 | `xhs recent [--limit N] [--account <name>]` | 创作者后台已发笔记 |
 | `xhs detail <noteId> [--account <name>]` | 笔记详情 |
 | `xhs posted [--account <name>]` | 本地 `published/` 归档列表 |
-| `xhs post --title … (--content … \| --content-file …) --image … [--account <name>]` | 创作页填表发帖 |
+| `xhs post --title … (--content … \| --content-file …) --image … [--account <name>]` | 创作页填表发帖（图文） |
+| `xhs longtext --title … (--content … \| --content-file … \| --md-file …) [--description …] [--publish] [--account <name>]` | 长文/文章发帖（正文渲染成图） |
+| `xhs home [home\|note-manager\|content\|fans\|profile] [--account <name>]` | 打开创作者后台（独立 Chrome） |
 
 ## 数据目录
 
@@ -96,6 +119,7 @@ xhs posted
 
 - 本工具**不会**在未经你确认的情况下向小红书发稿。
 - `xhs post` 未加 `--publish` 时：填入标题、正文、图片后保持浏览器窗口，由你在页面中确认并发布。
+- `xhs longtext` 默认同样只填表；加 `--publish` 会尝试自动完成排版与发布。
 - `--publish` 会尝试自动点击「发布」，是否成功以页面实际状态为准。
 
 ## 许可证

@@ -20,10 +20,11 @@
 - **多账号**：`~/.config/xhs-cli/.cache/accounts/<slug>/browser-data`；**当前账号**在 `accounts/registry.json` 的 `currentAccount`
 - 发布归档（可选）：`~/.config/xhs-cli/.cache/published/`
 
-**发帖**：`post` 子命令仅使用当次传入的 `--title`、`--content`（或 `--content-file`）与 `--image` 路径。
+**发帖**：`post` 子命令仅使用当次传入的 `--title`、`--content`（或 `--content-file`）与 `--image` 路径。`longtext` 使用 `--title` 与 `--content`/`--content-file`/`--md-file`（可选 `--description`）。
 
 ## 实现位置
 
 - CLI：`src/cli/cliRouter.ts`；会话解析：`src/toolset/sessionResolve.ts`（`resolveAccountSlug` / `resolveSession`）
-- 小红书业务：`src/toolset/`（`post.ts`、`login.ts`、`get_*` 等）
+- 小红书业务：`src/toolset/`（`post.ts`、`postLongText.ts`、`login.ts`、`get_*`、`open_home.ts` 等）
+- 对外集成：`implPost`、`implPostLongText`、`implOpenHome` 等同名 `impl*`（见 `src/toolset/index.ts`）
 - 浏览器：`src/browser/index.ts`
