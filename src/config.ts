@@ -31,6 +31,8 @@ export const ACCOUNTS_ROOT = join(CACHE_DIR, 'accounts');
 export const ACCOUNTS_REGISTRY_PATH = join(ACCOUNTS_ROOT, 'registry.json');
 /** 已发布归档：`~/.config/xhs-cli/.cache/published/` */
 export const PUBLISHED_ROOT = join(CACHE_DIR, 'published');
+/** 创作百科采集输出：`~/.config/xhs-cli/.cache/wiki/` */
+export const WIKI_DIR = join(CACHE_DIR, 'wiki');
 
 // 笔记缓存目录
 export const NOTES_CACHE_DIR = join(CACHE_DIR, 'notes');

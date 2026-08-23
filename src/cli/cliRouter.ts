@@ -6,10 +6,19 @@ import { fileURLToPath } from 'url';
 import {
   implLogin,
   implGetOperationData,
+  implGetOperationSnapshot,
   implPosted,
+  implPostedData,
   implGetNoteDetail,
+  implGetNoteDetailData,
   implPost,
   implPostLongText,
+  implListDrafts,
+  implCleanDrafts,
+  implFetchWiki,
+  implFetchAcademy,
+  implLint,
+  takeLongTextDeferredExit,
   implOpenHome,
   resolveSession,
 } from '../toolset/index.js';
@@ -51,11 +60,12 @@ function printHelp(): void {
       显示版本号（别名 -v / --version）
 
   # 业务命令默认使用当前账号（xhs account use）；临时切换用 --account <name>
+  # recent / metrics / detail 均支持 --json 输出结构化数据
   xhs login [--account <name>]
-  xhs metrics [--account <name>]
-  xhs recent [--limit <n>] [--account <name>]
+  xhs metrics [--json] [--account <name>]
+  xhs recent [--limit <n>] [--json] [--account <name>]
   xhs posted [--account <name>]
-  xhs detail <noteId> [--account <name>]
+  xhs detail <noteId> [--json] [--account <name>]
   xhs post (--title <标题> (--content <正文> | --content-file <路径>))
               [--image <路径>]... [--publish | --publish=true|false] [--account <name>]
 
@@ -69,6 +79,20 @@ function printHelp(): void {
   xhs account show <name>
   xhs account use <name>
   xhs account current
+
+  # 平台草稿箱（创作者后台自动保存的草稿；删除不可恢复）
+  xhs drafts list [--json] [--account <name>]
+  xhs drafts clean [--type <video|image|longtext|other>]… [--yes] [--account <name>]
+
+  # 创作百科采集（输出 markdown 到 ~/.config/xhs-cli/.cache/wiki/，可作技能引用文档）
+  xhs wiki [fetch] [--out <目录>] [--json] [--account <name>]
+
+  # 创作学院课程采集（图文全文 / 视频下载与 Whisper 转写）
+  # GPU 可用时自动探测；可用 XHS_TRANSCRIBE_DEVICE=cuda|cpu 覆盖
+  xhs academy [--limit <n>] [--download-only | --transcribe] [--out <目录>] [--json] [--account <name>]
+
+  # 发帖前预检（纯本地：标题/字数/图片张数/风控词）
+  xhs lint (--title <标题> (--content <正文> | --content-file <路径>)) [--image <路径>]… [--json]
 
 数据目录见 ~/.config/xhs-cli/.cache/（详见 README 与 src/config.ts）。
 备注：不会在无人确认时擅自发帖；xhs post 的 --publish 由人工按需触发。
@@ -115,8 +139,72 @@ function accountFromOpts(opts: Record<string, string>): string | undefined {
   return readAccountFromOpts(opts);
 }
 
-function runAccountCommand(tail: string[]): void {
-  const sub = tail[0]?.toLowerCase()?.trim();
+/** 平台草稿箱：list / clean */
+async function runDraftsCommand(tail: string[]): Promise<void> {
+  const sub = tail[0]?.toLowerCase()?.trim() || 'list';
+  const rest = tail.slice(sub === 'list' || sub === 'clean' ? 1 : 0);
+  if (sub !== 'list' && sub !== 'clean') {
+    die('❌ 用法: drafts list [--json] | drafts clean [--type <video|image|longtext|other>]… [--yes]');
+  }
+  const { opts, flags, rest: positional } = parseOpts(rest);
+  if (positional.length > 0) {
+    die(`❌ 多余参数: ${positional.join(' ')}`);
+  }
+
+  // clean 的参数校验先于账号解析(纯参数检查,不依赖环境)
+  let types: string[] | undefined;
+  if (sub === 'clean') {
+    if (opts.type !== undefined) {
+      const valid = new Set(['video', 'image', 'longtext', 'other']);
+      types = opts.type.split(',').map((s) => s.trim()).filter(Boolean);
+      const bad = types.filter((t) => !valid.has(t));
+      if (bad.length > 0) {
+        die(`❌ --type 不支持: ${bad.join(',')}（可选 video,image,longtext,other）`);
+      }
+    }
+    if (!flags.has('yes')) {
+      die([
+        '❌ 清理平台草稿不可恢复。请先 `xhs drafts list` 确认内容，',
+        '再执行 `xhs drafts clean [--type <…>] --yes`。',
+      ].join('\n'));
+    }
+  }
+
+  const session = resolveSessionCli(accountFromOpts(opts));
+
+  if (sub === 'list') {
+    const snap = await implListDrafts(session);
+    if (flags.has('json')) {
+      console.log(JSON.stringify(snap, null, 2));
+      return;
+    }
+    console.log(`草稿箱共 ${snap.total} 篇`);
+    for (const g of snap.groups) {
+      console.log(`\n【${g.label}】${g.items.length} 篇`);
+      for (const it of g.items.slice(0, 50)) {
+        const title = it.title.replace(/\s+/g, ' ').slice(0, 40) || '(无标题)';
+        console.log(`  · ${title}  ${it.time}`);
+      }
+      if (g.items.length > 50) {
+        console.log(`  … 其余 ${g.items.length - 50} 篇省略`);
+      }
+    }
+    return;
+  }
+
+  // clean
+  const res = await implCleanDrafts(session, {
+    types,
+    onProgress: (m) => console.error(m),
+  });
+  const perType = res.perType
+    .filter((p) => p.deleted > 0)
+    .map((p) => `${p.type}:${p.deleted}`)
+    .join('  ');
+  console.log(`✅ 已删除 ${res.deleted} 篇草稿${perType ? `（${perType}）` : ''}，剩余 ${res.remaining} 篇`);
+}
+
+function runAccountCommand(tail: string[]): void {  const sub = tail[0]?.toLowerCase()?.trim();
   const rest = tail.slice(1);
   if (!sub || sub === 'help' || sub === '--help') {
     die(`❌ 用法: account list | add <name> | show <name> | use <name> | current`);
@@ -189,7 +277,7 @@ export async function runOneCommand(argv: string[]): Promise<void> {
     return;
   }
   if (cmd === 'drafts' || cmd === 'draft') {
-    die('❌ 本地草稿功能已移除，请使用：xhs post --title <标题> (--content | --content-file) --image <路径> …');
+    return runDraftsCommand(tail);
   }
 
   if (cmd === 'published') {
@@ -228,11 +316,16 @@ export async function runOneCommand(argv: string[]): Promise<void> {
     return;
   }
   if (cmd === 'metrics') {
-    const { opts, rest } = parseOpts(tail);
+    const { opts, rest, flags } = parseOpts(tail);
     if (rest.length > 0) {
-      die('❌ 用法: metrics [--account <name>]');
+      die('❌ 用法: metrics [--json] [--account <name>]');
     }
-    console.log(await implGetOperationData(resolveSessionCli(accountFromOpts(opts))));
+    const session = resolveSessionCli(accountFromOpts(opts));
+    if (flags.has('json')) {
+      console.log(JSON.stringify(await implGetOperationSnapshot(session), null, 2));
+    } else {
+      console.log(await implGetOperationData(session));
+    }
     return;
   }
 
@@ -247,27 +340,39 @@ export async function runOneCommand(argv: string[]): Promise<void> {
   }
 
   if (cmd === 'recent') {
-    const { opts, rest } = parseOpts(tail);
+    const { opts, rest, flags } = parseOpts(tail);
     if (rest.length > 0) {
-      die('❌ 用法: recent [--limit <n>] [--account <name>]');
+      die('❌ 用法: recent [--limit <n>] [--json] [--account <name>]');
     }
     const lim = opts.limit !== undefined ? parseInt(opts.limit, 10) : undefined;
     if (opts.limit !== undefined && (Number.isNaN(lim!) || lim! < 1)) {
       die('❌ --limit 需为正整数');
     }
-    console.log(
-      await implPosted(lim, resolveSessionCli(accountFromOpts(opts))),
-    );
+    const session = resolveSessionCli(accountFromOpts(opts));
+    if (flags.has('json')) {
+      console.log(JSON.stringify(await implPostedData(lim, session), null, 2));
+    } else {
+      console.log(await implPosted(lim, session));
+    }
     return;
   }
 
   if (cmd === 'detail' || cmd === 'note-detail') {
-    const { opts, rest } = parseOpts(tail);
+    const { opts, rest, flags } = parseOpts(tail);
     const id = rest[0]?.trim();
     if (!id || rest.length > 1) {
-      die('❌ 用法: detail <noteId> [--account <name>]');
+      die('❌ 用法: detail <noteId> [--json] [--account <name>]');
     }
-    console.log(await implGetNoteDetail(id, resolveSessionCli(accountFromOpts(opts))));
+    const session = resolveSessionCli(accountFromOpts(opts));
+    if (flags.has('json')) {
+      const data = await implGetNoteDetailData(id, session);
+      if (!data) {
+        die(`未找到笔记详情: ${id}`);
+      }
+      console.log(JSON.stringify(data, null, 2));
+    } else {
+      console.log(await implGetNoteDetail(id, session));
+    }
     return;
   }
 
@@ -353,6 +458,106 @@ export async function runOneCommand(argv: string[]): Promise<void> {
         browserUserDataDir: session.browserUserDataDir,
       }),
     );
+    // 发布后自动验证接管了退出时机（绕过 postLongText 内部的 process.exit）
+    if (takeLongTextDeferredExit()) {
+      process.exit(0);
+    }
+    return;
+  }
+
+  if (cmd === 'wiki' || cmd === 'encyclopedia') {
+    // 创作百科采集:输出 markdown 到 .cache/wiki/(可作为技能引用文档)
+    const { opts, flags, rest } = parseOpts(tail);
+    if (rest.length > 0) {
+      die('❌ 用法: wiki [fetch] [--out <目录>] [--json] [--account <name>]');
+    }
+    const sub = tail[0]?.toLowerCase();
+    if (sub !== undefined && sub !== 'fetch') {
+      die('❌ 用法: wiki [fetch] [--out <目录>] [--json]');
+    }
+    const session = resolveSessionCli(accountFromOpts(opts));
+    const res = await implFetchWiki(session, {
+      outDir: opts.out?.trim() || undefined,
+      onProgress: (m) => console.error(m),
+    });
+    if (flags.has('json')) {
+      console.log(JSON.stringify(res, null, 2));
+    } else {
+      console.log(`\n✅ 已采集 ${res.files.length}/6 个分类，共 ${res.totalChars} 字`);
+      console.log(`输出目录: ${res.outDir}`);
+      for (const f of res.files) {
+        console.log(`  · ${f.category}.md  (${f.sections} 章节 / ${f.questions} 问题)`);
+      }
+      if (res.errors.length > 0) {
+        console.log(`⚠️ ${res.errors.length} 个分类采集失败，可重试`);
+      }
+    }
+    return;
+  }
+
+  if (cmd === 'lint') {
+    // 发帖前预检:纯本地校验(结构规则+风控词),不访问网络
+    const { opts, flags } = parseOpts(tail);
+    let content = opts.content ?? '';
+    if (opts['content-file']) {
+      const p = opts['content-file'];
+      if (!existsSync(p)) {
+        die(`❌ 找不到文件: ${p}`);
+      }
+      content = readFileSync(p, 'utf-8');
+    }
+    const imagePaths = collectImagePaths(tail);
+    const res = implLint({
+      title: opts.title,
+      content,
+      imageCount: imagePaths.length > 0 ? imagePaths.length : undefined,
+    });
+    if (flags.has('json')) {
+      console.log(JSON.stringify(res, null, 2));
+    } else {
+      for (const i of res.issues) {
+        const mark = i.level === 'error' ? '❌' : '⚠️ ';
+        console.log(`${mark} [${i.code}] ${i.message}`);
+      }
+      console.log(res.ok ? '\n✅ 预检通过（注意 ⚠️ 项为建议）' : '\n❌ 存在必须修复的问题');
+    }
+    if (!res.ok) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (cmd === 'academy') {
+    // 创作学院课程采集(图文全文/视频简介)
+    const { opts, flags } = parseOpts(tail);
+    if (opts.limit !== undefined && !/^\d+$/.test(opts.limit)) {
+      die('❌ --limit 需为正整数');
+    }
+    const session = resolveSessionCli(accountFromOpts(opts));
+    const res = await implFetchAcademy(session, {
+      outDir: opts.out?.trim() || undefined,
+      maxCourses: opts.limit ? parseInt(opts.limit, 10) : undefined,
+      transcribe: flags.has('transcribe'),
+      downloadOnly: flags.has('download-only'),
+      onProgress: (m) => console.error(m),
+    });
+    const videos = res.courses.filter((c) => c.type === '视频').length;
+    if (flags.has('json')) {
+      console.log(JSON.stringify(res, null, 2));
+    } else {
+      const s = res.summary;
+      console.log(`\n✅ 已采集 ${res.courses.length} 门课程（图文 ${res.inventory.image} / 视频 ${videos}）`);
+      console.log(`⬇️ 下载：目标 ${s.download.total}，已有 ${s.download.existing}，新增 ${s.download.downloaded}，失败 ${s.download.failed}，媒体地址缺失 ${s.mediaMissing}`);
+      console.log(`🎧 转写：目标 ${s.transcription.targeted}，成功 ${s.transcription.succeeded}，失败 ${s.transcription.failed}，未下载 ${s.transcription.notDownloaded}`);
+      console.log(`⚠️ 失败课程 ${s.failedCourses}，错误明细 ${s.errorCount}`);
+      console.log(`索引文件: ${res.outDir}/academy-index.json`);
+      for (const f of res.files) {
+        console.log(`  · ${f}`);
+      }
+    }
+    if ((flags.has('download-only') || flags.has('transcribe')) && res.summary.failedCourses > 0) {
+      process.exitCode = 1;
+    }
     return;
   }
 

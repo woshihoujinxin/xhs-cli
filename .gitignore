@@ -5,7 +5,12 @@ dist-test/
 .env
 .env.deploy
 .DS_Store
-*.tsbuildinfo
+__pycache__/
+*.pyc
+probe-*.json
+tmp-probe-*.mjs
+academy-run.log
+academy-err.log
 cache/
 .cache/
 XHS/

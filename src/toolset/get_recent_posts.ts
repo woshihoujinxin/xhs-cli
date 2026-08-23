@@ -18,6 +18,11 @@ interface NoteRaw {
   coverImage: string;
 }
 
+export interface RecentPostsResult {
+  totalCount: number | null;
+  notes: NoteRaw[];
+}
+
 function formatNote(note: NoteRaw): string {
   const tag = note.tag ? `  [${note.tag}]` : '';
   return [
@@ -30,42 +35,84 @@ function formatNote(note: NoteRaw): string {
 }
 
 // 新版小红书创作者后台(.note-card)的互动数提取
-// 5 个 .note-card__stat 按顺序:浏览/点赞/评论/收藏/分享
+// 优先按统计项 SVG 图标特征识别(浏览/评论/点赞/收藏/分享),平台调整顺序也不受影响;
+// 图标对不上时回退到 2026-08 实测的位置顺序:浏览/评论/点赞/收藏/分享(第2个气泡=评论,第3个爱心=点赞)
+
+/** 图标 path d 属性的唯一起始片段 → 字段 */
+const STAT_ICON_SIGNATURES: Array<{ field: 'views' | 'comments' | 'likes' | 'favorites' | 'shares'; sig: string }> = [
+  { field: 'views', sig: 'M7.99902 3.83398' },      // 眼睛
+  { field: 'comments', sig: 'M3.18233 10.985' },    // 气泡
+  { field: 'likes', sig: 'M3.25611 3.91336' },      // 爱心(外描边)
+  { field: 'favorites', sig: 'M10.8848 14.2322' },  // 五角星
+  { field: 'shares', sig: 'M8.28672 5.15797' },     // 纸飞机/分享箭头
+];
+
 async function getNewInteractions(page: Page, card: ElementHandle): Promise<{
   views: string; likes: string; comments: string; favorites: string; shares: string;
 }> {
-  return await page.evaluate((el) => {
-    const stats = el.querySelectorAll('.note-card__stat');
-    const texts: string[] = Array.from(stats).map(s => {
-      const span = s.querySelector('span');
-      return span ? (span.textContent || '').trim() : '0';
-    });
-    // 兜底:有些版本互动数直接在 .note-card__stats 下的 span
-    if (texts.length === 0) {
-      const statsContainer = el.querySelector('.note-card__stats');
-      if (statsContainer) {
-        statsContainer.querySelectorAll('span').forEach(s => {
+  return await page.evaluate((el, iconSigs) => {
+    const nodes = Array.from(el.querySelectorAll('.note-card__stat'));
+    const byField: Partial<Record<string, string>> = {};
+    const positional: string[] = [];
+    for (const node of nodes) {
+      const span = node.querySelector('span');
+      const value = span ? (span.textContent || '').trim() : '';
+      positional.push(value);
+      // 收集该统计项内所有 svg path 的 d,与签名比对
+      const ds: string[] = [];
+      node.querySelectorAll('svg path').forEach((p) => {
+        const d = p.getAttribute('d') || '';
+        if (d) ds.push(d);
+      });
+      for (const { field, sig } of iconSigs) {
+        if (byField[field] !== undefined) continue;
+        if (ds.some((d) => d.startsWith(sig))) {
+          byField[field] = value;
+          break;
+        }
+      }
+    }
+    // 兜底1:有些版本互动数直接在 .note-card__stats 下的 span
+    if (positional.length === 0) {
+      const container = el.querySelector('.note-card__stats');
+      if (container) {
+        container.querySelectorAll('span').forEach((s) => {
           const t = (s.textContent || '').trim();
-          if (/^\d+$/.test(t)) texts.push(t);
+          if (/^\d+$/.test(t)) positional.push(t);
         });
       }
     }
-    while (texts.length < 5) texts.push('0');
+    while (positional.length < 5) positional.push('0');
+
+    // 图标全部命中 → 用识别结果;否则回退位置顺序(2026-08:浏览/评论/点赞/收藏/分享)
+    const matchedAll =
+      ['views', 'comments', 'likes', 'favorites', 'shares'].every((f) => byField[f] !== undefined) &&
+      positional.length >= 5 &&
+      nodes.length > 0;
+    if (matchedAll) {
+      return {
+        views: byField.views || '0',
+        comments: byField.comments || '0',
+        likes: byField.likes || '0',
+        favorites: byField.favorites || '0',
+        shares: byField.shares || '0',
+      };
+    }
     return {
-      views: texts[0] || '0',
-      likes: texts[1] || '0',
-      comments: texts[2] || '0',
-      favorites: texts[3] || '0',
-      shares: texts[4] || '0',
+      views: positional[0] || '0',
+      comments: positional[1] || '0',
+      likes: positional[2] || '0',
+      favorites: positional[3] || '0',
+      shares: positional[4] || '0',
     };
-  }, card);
+  }, card, STAT_ICON_SIGNATURES);
 }
 
 async function scrapeRecentPosts(
   page: Page,
   session: ResolvedSession,
   limit?: number,
-): Promise<string> {
+): Promise<RecentPostsResult> {
   await page.goto('https://creator.xiaohongshu.com/new/note-manager', {
     waitUntil: 'domcontentloaded',
     timeout: 30000,
@@ -191,20 +238,33 @@ async function scrapeRecentPosts(
     results.push(note);
   }
 
-  if (results.length === 0) return '未找到笔记数据';
+  if (results.length === 0) return { totalCount, notes: [] };
+  return { totalCount, notes: results };
+}
+
+function formatRecentPostsResult(result: RecentPostsResult, limit?: number): string {
+  const { totalCount, notes } = result;
+  if (notes.length === 0) return '未找到笔记数据';
   // 头部:共 X 篇 + 本次显示 Y 篇(仅当 limit 指定或总数与显示数不一致时显示)
   const headerParts: string[] = [];
   if (totalCount !== null) headerParts.push(`共 ${totalCount} 篇`);
-  if (typeof limit === 'number' || (totalCount !== null && results.length < totalCount)) {
-    headerParts.push(`显示 ${results.length} 篇`);
+  if (typeof limit === 'number' || (totalCount !== null && notes.length < totalCount)) {
+    headerParts.push(`显示 ${notes.length} 篇`);
   }
   const header = headerParts.length > 0 ? headerParts.join(' · ') + '\n\n' : '';
-  return header + results.map(formatNote).join('\n\n');
+  return header + notes.map(formatNote).join('\n\n');
+}
+
+export async function getRecentPostsData(
+  session: ResolvedSession,
+  limit?: number,
+): Promise<RecentPostsResult> {
+  return withLoggedInPage((page) => scrapeRecentPosts(page, session, limit), session.browserUserDataDir);
 }
 
 export async function getRecentPosts(
   session: ResolvedSession,
   limit?: number,
 ): Promise<string> {
-  return withLoggedInPage((page) => scrapeRecentPosts(page, session, limit), session.browserUserDataDir);
+  return formatRecentPostsResult(await getRecentPostsData(session, limit), limit);
 }

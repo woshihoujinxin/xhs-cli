@@ -4,12 +4,12 @@ import { saveToCache, loadFromCache } from '../utils/cache.js';
 import { prefixedCacheFilename } from './cachePaths.js';
 import type { ResolvedSession } from './sessionTypes.js';
 
-interface TrafficSourceRow {
+export interface TrafficSourceRow {
   name: string;
   percentage: string;
 }
 
-interface OperationDataSnapshot {
+export interface OperationDataSnapshot {
   date: string;
   totalFans: string;
   newFans: string;
@@ -47,6 +47,7 @@ interface FanSummary {
 interface OperationDataTextCache {
   date: string;
   text: string;
+  snapshot?: OperationDataSnapshot;
 }
 
 function findMetric(source: HomeBlockRow[], keywords: string[]): string {
@@ -313,11 +314,35 @@ export async function getOperationData(session: ResolvedSession): Promise<string
     return cached.text;
   }
 
-  const snapshot = await withLoggedInPage(async (page: Page) => {
+  const snapshot = await fetchFreshSnapshot(session);
+  const text = formatOperationSnapshot(snapshot);
+  saveToCache(cacheFilename, { date: today, text, snapshot });
+  return text;
+}
+
+/**
+ * 获取运营数据快照（结构化；同日缓存命中则直接返回，供 --json 输出）
+ */
+export async function getOperationSnapshot(session: ResolvedSession): Promise<OperationDataSnapshot> {
+  const today = new Date().toISOString().split('T')[0];
+  const CACHE_VERSION = 'v2';
+  const cacheFilename = prefixedCacheFilename(
+    session.cachePathPrefix,
+    `operation_data/${today}_${CACHE_VERSION}_text.json`,
+  );
+  const cached = loadFromCache<OperationDataTextCache>(cacheFilename);
+  if (cached && cached.date === today && cached.snapshot) {
+    return cached.snapshot;
+  }
+  const snapshot = await fetchFreshSnapshot(session);
+  const text = formatOperationSnapshot(snapshot);
+  saveToCache(cacheFilename, { date: today, text, snapshot });
+  return snapshot;
+}
+
+function fetchFreshSnapshot(session: ResolvedSession): Promise<OperationDataSnapshot> {
+  return withLoggedInPage(async (page: Page) => {
     const fetcher = new XHSOperationDataFetcher(page);
     return await fetcher.fetchAllData();
   }, session.browserUserDataDir);
-  const text = formatOperationSnapshot(snapshot);
-  saveToCache(cacheFilename, { date: today, text });
-  return text;
 }

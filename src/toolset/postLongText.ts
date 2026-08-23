@@ -15,7 +15,7 @@ import { existsSync } from 'fs';
 import { resolve } from 'path';
 import { launchBrowser } from '../browser/index.js';
 import { ensureAppDataLayout } from '../config.js';
-import { PUBLISH_BUTTON_LABELS } from './publishButton.js';
+import { PUBLISH_BUTTON_LABELS, clickWebComponentPublish } from './publishButton.js';
 import {
   validateArticleParams,
   type ArticlePostParams,
@@ -71,12 +71,63 @@ const FOOTER_BUTTON_SELECTORS = [
   '.footerContainer button',
   'button',
 ];
+// 注意:不要加 '.btn-wrapper' —— 那是左上角侧边栏「发布笔记」导航,
+// 点它会跳转到发布中枢且不发布,内容留在草稿箱。
+// 真正的提交按钮是 Web Component <xhs-publish-btn>(Shadow DOM),
+// 用 publishButton.ts 的 clickWebComponentPublish 处理。
 
 /** 「一键排版」按钮文案（点它才会触发正文→图片转换，进入发布环节） */
-const NEXT_BUTTON_LABELS = ['一键排版', '下一步', '保存并下一步', '继续'];
+export const NEXT_BUTTON_LABELS = ['一键排版', '下一步', '继续'] as const;
+
+/** 自动发布流程结束后不保留编辑器页面，避免平台继续自动保存草稿。 */
+export function shouldKeepEditorOpen(autoPublish: boolean): boolean {
+  return !autoPublish;
+}
 
 /** 「发布」按钮文案候选（复用 publishButton 常量 + 常见别名） */
 const PUBLISH_LABELS = [...PUBLISH_BUTTON_LABELS, '发布笔记'];
+
+/** 发布点击后等待成功信号；期间尝试点掉确认弹窗（如活动/声明类二次确认） */
+async function waitForPublishConfirmation(page: Page, timeoutMs = 15000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  let modalTried = false;
+  while (Date.now() < deadline) {
+    const state = await page.evaluate(() => ({
+      url: location.href,
+      // 成功信号:成功页 URL、成功提示文案,或已离开文章发布表单(平台会跳转到发布中枢/笔记管理)
+      hasSuccessUrl:
+        /publish\/success|publish_success|\/success/.test(location.href) ||
+        !/target=article/.test(location.href),
+      hasSuccessText: /(发布成功|已发布成功|发布完成)/.test(document.body?.innerText || ''),
+    }));
+    if (state.hasSuccessUrl || state.hasSuccessText) {
+      return true;
+    }
+    if (!modalTried) {
+      modalTried = await page.evaluate(() => {
+        const visible = Array.from(
+          document.querySelectorAll('button, [role="button"], [class*="btn"]'),
+        ).filter((el) => {
+          const n = el as HTMLElement;
+          const r = n.getBoundingClientRect();
+          const st = window.getComputedStyle(n);
+          return r.width > 0 && r.height > 0 && st.display !== 'none' && st.visibility !== 'hidden';
+        });
+        const labels = ['继续发布', '确认发布', '确定', '确认'];
+        for (const label of labels) {
+          const hit = visible.find((b) => ((b.textContent || '').trim() === label));
+          if (hit) {
+            (hit as HTMLElement).click();
+            return true;
+          }
+        }
+        return false;
+      });
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return false;
+}
 
 const ARTICLE_URL =
   'https://creator.xiaohongshu.com/publish/publish?from=menu&target=article';
@@ -91,7 +142,7 @@ function normalizeLabel(text: string): string {
  */
 async function findFooterButton(
   page: Page,
-  labels: string[],
+  labels: readonly string[],
 ): Promise<ElementHandle<Element> | null> {
   const allowed = new Set(labels.map(normalizeLabel));
   for (const sel of FOOTER_BUTTON_SELECTORS) {
@@ -126,7 +177,7 @@ async function findFooterButton(
  */
 async function clickFooterButton(
   page: Page,
-  opts: { labels: string[]; envX: string; envY: string; preWaitMs: number; pollMs?: number },
+  opts: { labels: readonly string[]; envX: string; envY: string; preWaitMs: number; pollMs?: number; allowCoords?: boolean },
 ): Promise<{ by: 'selector' | 'coords' }> {
   await new Promise((r) => setTimeout(r, opts.preWaitMs));
 
@@ -147,7 +198,13 @@ async function clickFooterButton(
     // 继续坐标兜底
   }
 
-  // 2. 屏幕坐标兜底
+  // 2. 关键流程按钮禁止坐标兜底：坐标可能误点「暂存/保存并下一步」，
+  //    让页面自动保存成草稿。只有发布按钮等明确允许时才使用坐标兜底。
+  if (opts.allowCoords === false) {
+    throw new Error(`未找到可点击按钮：${opts.labels.join(' / ')}（已禁用坐标兜底，避免误保存草稿）`);
+  }
+
+  // 3. 屏幕坐标兜底
   const screenX = parseInt(opts.envX, 10);
   const screenY = parseInt(opts.envY, 10);
   if (
@@ -202,19 +259,50 @@ async function fillTitle(page: Page, title: string): Promise<boolean> {
  * 才会渲染 textarea[placeholder="输入标题"] 与 .tiptap.ProseMirror 编辑器。
  */
 async function clickStartCreate(page: Page): Promise<boolean> {
-  try {
-    const btn = await findFooterButton(page, START_CREATE_LABELS);
-    if (btn) {
-      await btn.click({ delay: 50 });
-      // 等编辑器渲染
-      await page
-        .waitForSelector('textarea[placeholder="输入标题"]', { timeout: 8000 })
-        .catch(() => {});
-      await new Promise((r) => setTimeout(r, 1500));
-      return true;
+  // 起始页是异步渲染的，不能因为页面先出现了其它 button 就立即判定
+  // 「新的创作」不存在。轮询整个起始页，直到入口真正挂载。
+  const labels = ['新的创作', '开始创作', '创建文章', '写长文'];
+  const deadline = Date.now() + 20000;
+
+  while (Date.now() < deadline) {
+    const handles = await page.$$('button, [role="button"], a, [class*="create"], [class*="Create"]');
+    for (const handle of handles) {
+      try {
+        const info = await handle.evaluate((el) => {
+          const node = el as HTMLElement;
+          const rect = node.getBoundingClientRect();
+          const style = window.getComputedStyle(node);
+          return {
+            text: (node.innerText || node.textContent || '').replace(/\s+/g, ''),
+            aria: node.getAttribute('aria-label') || '',
+            title: node.getAttribute('title') || '',
+            visible: style.display !== 'none' && style.visibility !== 'hidden' &&
+              rect.width > 0 && rect.height > 0,
+          };
+        });
+        const matched = labels.some((label) =>
+          info.text === label || info.aria === label || info.title === label,
+        );
+        if (!matched || !info.visible) continue;
+
+        // 使用 Puppeteer 的真实鼠标点击，不使用 HTMLElement.click()，
+        // 以兼容 Vue/React 组件依赖 pointer/mouse 事件的新版页面。
+        await handle.click({ delay: 80 });
+        try {
+          await page.waitForFunction(() => Boolean(
+            document.querySelector('textarea[placeholder="输入标题"]') ||
+            document.querySelector('input.d-text') ||
+            document.querySelector('div[contenteditable="true"]'),
+          ), { timeout: 12000 });
+          return true;
+        } catch {
+          // 点击可能命中了装饰节点；继续寻找同文案的真实交互节点。
+        }
+      } catch {
+        // DOM 在异步刷新，当前 handle 失效时重新查询。
+      }
     }
-  } catch {
-    // 忽略，返回 false
+    await new Promise((r) => setTimeout(r, 500));
   }
   return false;
 }
@@ -330,8 +418,9 @@ export async function postLongText(
     process.env.XHS_HEADLESS?.toLowerCase() === 'true';
 
   const browser = await launchBrowser(headless, [], args.browserUserDataDir);
+  let page: import('puppeteer-core').Page | undefined;
   try {
-    const page = await browser.newPage();
+    page = await browser.newPage();
 
     // ① 校验登录（等真实跳转完成，不固定 sleep）
     console.error('① 校验登录状态…');
@@ -399,6 +488,7 @@ export async function postLongText(
       envX: process.env.XHS_LONGTEXT_NEXT_X ?? '934',
       envY: process.env.XHS_LONGTEXT_NEXT_Y ?? '983',
       preWaitMs: 0,
+      allowCoords: false,
     });
     console.error(`   一键排版点击方式: ${formatBy.by}`);
 
@@ -410,6 +500,7 @@ export async function postLongText(
       envY: process.env.XHS_LONGTEXT_NEXT_Y ?? '983',
       preWaitMs: 0,
       pollMs: 10000,
+      allowCoords: false,
     });
     console.error(`   下一步点击方式: ${nextBy.by}`);
 
@@ -459,22 +550,60 @@ export async function postLongText(
       }
     }
 
-    // ⑥ 进入常规发布页，点「发布」(轮询等按钮渲染；跳转后即出现，无需额外 sleep)
-    console.error('⑥ 点击「发布」(常规发布页，轮询等待)…');
-    const pubBy = await clickFooterButton(page, {
-      labels: PUBLISH_LABELS,
-      envX: process.env.XHS_PUBLISH_X ?? '934',
-      envY: process.env.XHS_PUBLISH_Y ?? '983',
-      preWaitMs: 0,
-      pollMs: 10000,
-    });
-    console.error(`   发布点击方式: ${pubBy.by}`);
+    // ⑥ 进入常规发布页，点「发布」
+    // 6a. 优先:Web Component <xhs-publish-btn>(2026-08 改版后的真实提交入口)
+    console.error('⑥ 点击「发布」(常规发布页)…');
+    let pubBy: 'selector' | 'coords' | 'webcomponent';
+    if (await clickWebComponentPublish(page, 12000)) {
+      pubBy = 'webcomponent';
+    } else {
+      // 6b. 兜底:旧版"选择器+文案"(老版式 <button>),再不行坐标(历史校准位)
+      const res = await clickFooterButton(page, {
+        labels: PUBLISH_LABELS,
+        envX: process.env.XHS_PUBLISH_X ?? '934',
+        envY: process.env.XHS_PUBLISH_Y ?? '983',
+        preWaitMs: 0,
+        pollMs: 10000,
+      });
+      pubBy = res.by;
+    }
+    console.error(`   发布点击方式: ${pubBy}`);
+
+    // ⑦ 发布结果确认：等页面跳转到成功页或出现成功提示；期间处理确认弹窗。
+    // 没有成功信号就如实报失败，避免"点了但没发出去"的假成功（坐标兜底可能未命中）。
+    if (autoPublish) {
+      console.error('⑦ 确认发布结果…');
+      const confirmed = await waitForPublishConfirmation(page);
+      if (!confirmed) {
+        return {
+          success: false,
+          message:
+            '已点击「发布」但未检测到发布成功信号。可能未命中按钮或被弹窗拦截；' +
+            '请用 xhs home note 打开后台人工确认，未知结果前勿盲目重发。',
+        };
+      }
+      return {
+        success: true,
+        message: '已依次点击「一键排版」→「下一步」→「发布」，页面已确认发布成功。',
+      };
+    }
 
     return {
       success: true,
       message: '已依次点击「一键排版」→「下一步」→「发布」，请留意页面是否发布成功。',
     };
   } finally {
+    // 自动发布模式不再保留编辑器页面：页面残留会让小红书继续执行自动保存草稿。
+    // 手动确认模式必须保留页面，用户需要在浏览器中继续操作。
+    if (!shouldKeepEditorOpen(autoPublish) && page && !page.isClosed()) {
+      try {
+        await page.close({ runBeforeUnload: false });
+        console.error('   已关闭自动发布流程的编辑器页面，避免残留草稿继续保存');
+      } catch {
+        // 页面可能已被平台跳转或浏览器关闭，忽略清理失败。
+      }
+    }
+
     // disconnect 解除 puppeteer 对浏览器的控制，但浏览器进程保持运行（方便用户查看/操作）。
     // 注意：disconnect 后 puppeteer 的 CDP 定时器仍会阻止 Node 进程退出，
     // 这里强制结束进程，让命令干净返回（浏览器作为独立子进程继续存活）。

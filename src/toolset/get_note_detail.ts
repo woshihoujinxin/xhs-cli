@@ -18,6 +18,11 @@ interface ExtractedNoteDetail {
   editorUrl: string;
 }
 
+export interface NoteDetailData extends ExtractedNoteDetail {
+  noteId: string;
+  publicUrl: string;
+}
+
 // 小红书 noteId 格式:24 位十六进制(放宽到 8-32 位,兼容历史/特殊 ID)
 // 白名单校验,防 noteId 含 ../ 或特殊字符导致缓存路径遍历 / URL 注入
 const NOTE_ID_RE = /^[a-zA-Z0-9]{8,32}$/;
@@ -109,10 +114,10 @@ async function getNoteDetailById(page: Page, noteId: string): Promise<ExtractedN
   return detail;
 }
 
-export async function getNoteDetail(
+export async function getNoteDetailData(
   noteId: string,
   session: ResolvedSession,
-): Promise<string> {
+): Promise<NoteDetailData | null> {
   const id = normalizeNoteId(noteId);
   if (!id) {
     throw new Error('noteId 不能为空');
@@ -122,9 +127,9 @@ export async function getNoteDetail(
     session.cachePathPrefix,
     `notes/${id}_detail_text.json`,
   );
-  const cached = loadFromCache<NoteDetailTextCache>(cacheFilename);
-  if (cached?.text?.trim()) {
-    return cached.text;
+  const cached = loadFromCache<NoteDetailTextCache & { data?: ExtractedNoteDetail }>(cacheFilename);
+  if (cached?.data) {
+    return toDetailData(id, cached.data);
   }
 
   const detail = await withLoggedInPage(
@@ -132,7 +137,7 @@ export async function getNoteDetail(
     session.browserUserDataDir,
   );
   if (!detail) {
-    return `未找到笔记详情: ${id}`;
+    return null;
   }
 
   // 编辑页(/publish/update)通常不显示发布时间——它是改内容用的,不是看元数据
@@ -145,10 +150,34 @@ export async function getNoteDetail(
     }
   }
 
-  const text = formatNoteDetail(id, detail);
   saveToCache(cacheFilename, {
-    text,
+    text: formatNoteDetail(id, detail),
     updatedAt: new Date().toISOString(),
+    data: detail,
   });
-  return text;
+  return toDetailData(id, detail);
+}
+
+function toDetailData(noteId: string, d: ExtractedNoteDetail): NoteDetailData {
+  return { ...d, noteId, publicUrl: `https://www.xiaohongshu.com/explore/${noteId}` };
+}
+
+export async function getNoteDetail(
+  noteId: string,
+  session: ResolvedSession,
+): Promise<string> {
+  const id = normalizeNoteId(noteId);
+  const cacheFilename = prefixedCacheFilename(
+    session.cachePathPrefix,
+    `notes/${id}_detail_text.json`,
+  );
+  const cachedText = loadFromCache<NoteDetailTextCache>(cacheFilename);
+  if (cachedText?.text?.trim()) {
+    return cachedText.text;
+  }
+  const data = await getNoteDetailData(id, session);
+  if (!data) {
+    return `未找到笔记详情: ${id}`;
+  }
+  return formatNoteDetail(data.noteId, data);
 }

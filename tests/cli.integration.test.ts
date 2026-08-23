@@ -31,10 +31,16 @@ describe('CLI integration', () => {
     assert.match(r.stderr, /xhs account use/);
   });
 
-  it('draft command is removed', () => {
-    const r = run(['draft']);
+  it('drafts clean requires explicit --yes', () => {
+    const r = run(['drafts', 'clean']);
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /草稿功能已移除/);
+    assert.match(r.stderr, /--yes/);
+  });
+
+  it('drafts rejects unknown type', () => {
+    const r = run(['drafts', 'clean', '--type', 'bogus', '--yes']);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /--type 不支持/);
   });
 
   it('account add / use / current flow', () => {

@@ -6,6 +6,7 @@ import { ensureAppDataLayout } from '../config.js';
 import {
   PUBLISH_BUTTON_LABELS,
   PUBLISH_FOOTER_SELECTORS,
+  clickWebComponentPublish,
 } from './publishButton.js';
 import {
   validateImagePaths,
@@ -39,16 +40,52 @@ export type PostNoteArgs = {
 };
 
 /**
+ * 选择器优先点击「发布」：旧版 <button> + 2026-08 改版后的 div.btn-wrapper。
+ * CDP 合成点击不依赖窗口前台/焦点，被遮挡也能点（仅最小化不可）。
+ */
+async function clickPublishBySelector(page: Page): Promise<boolean> {
+  const labels = new Set(PUBLISH_BUTTON_LABELS.map((s) => s.replace(/\s+/g, '')));
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    for (const sel of PUBLISH_FOOTER_SELECTORS) {
+      const handles = await page.$$(sel);
+      for (const h of handles) {
+        let disabled = false;
+        let text = '';
+        try {
+          disabled = await h.evaluate((el) => (el as HTMLButtonElement).disabled === true);
+          text = await h.evaluate((el) => (el.textContent || '').trim());
+        } catch {
+          continue;
+        }
+        if (disabled) continue;
+        if (labels.has(text.replace(/\s+/g, ''))) {
+          await h.click({ delay: 50 });
+          return true;
+        }
+      }
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
+/**
  * 等待并点击「发布」按钮。
  * 策略:
- *   1. 先试旧版选择器(.publish-page-publish-btn 内可点击的 button,5 秒超时)
- *   2. 失败则 fallback:全页搜含「发布」文字的叶子元素,
- *      选最靠下的(cy 最大)= 底部发布按钮,避开左上角「发布笔记」导航,
- *      用坐标点击(兼容小红书新版页面改版)
+ *   1. 先试选择器(旧版 .publish-page-publish-btn 内 button + 新版 div.btn-wrapper)
+ *   2. 失败则 fallback:屏幕坐标(934,983,可用 XHS_PUBLISH_X/Y 覆盖)
  */
-async function waitAndClickPublish(page: Page): Promise<void> {
+async function waitAndClickPublish(page: Page): Promise<{ by: 'selector' | 'coords' | 'webcomponent' }> {
   // 等图片上传 + 页面稳定
   await new Promise((r) => setTimeout(r, 10000));
+  // 2026-08 改版:真实提交按钮是 Web Component <xhs-publish-btn>(Shadow DOM)
+  if (await clickWebComponentPublish(page, 12000)) {
+    return { by: 'webcomponent' };
+  }
+  if (await clickPublishBySelector(page)) {
+    return { by: 'selector' };
+  }
   // 发布按钮屏幕坐标(可通过 XHS_PUBLISH_X / XHS_PUBLISH_Y 环境变量覆盖,适配不同分辨率)
   const screenX = parseInt(process.env.XHS_PUBLISH_X ?? '934', 10);
   const screenY = parseInt(process.env.XHS_PUBLISH_Y ?? '983', 10);
@@ -68,6 +105,7 @@ async function waitAndClickPublish(page: Page): Promise<void> {
   }));
   await page.mouse.click(screenX - off.winX, screenY - off.winY - off.chrome);
   await new Promise((r) => setTimeout(r, 3000));
+  return { by: 'coords' };
 }
 
 /**
@@ -156,10 +194,10 @@ export async function postNote(args: PostNoteArgs): Promise<PostNoteResult> {
     }
 
     if (autoPublish) {
-      await waitAndClickPublish(page);
+      const by = await waitAndClickPublish(page);
       return {
         success: true,
-        message: '已自动点击「发布」，请留意页面是否发布成功',
+        message: `已自动点击「发布」(${by.by})，请留意页面是否发布成功`,
       };
     }
 
