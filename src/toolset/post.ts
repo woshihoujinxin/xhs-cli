@@ -7,6 +7,8 @@ import {
   PUBLISH_BUTTON_LABELS,
   PUBLISH_FOOTER_SELECTORS,
   clickWebComponentPublish,
+  clickPublishViaCdpPierce,
+  isPublishConfirmed,
 } from './publishButton.js';
 import {
   validateImagePaths,
@@ -76,7 +78,22 @@ async function clickPublishBySelector(page: Page): Promise<boolean> {
  *   1. 先试选择器(旧版 .publish-page-publish-btn 内 button + 新版 div.btn-wrapper)
  *   2. 失败则 fallback:屏幕坐标(934,983,可用 XHS_PUBLISH_X/Y 覆盖)
  */
-async function waitAndClickPublish(page: Page): Promise<{ by: 'selector' | 'coords' | 'webcomponent' }> {
+/**
+ * 等待并点击「发布」按钮。
+ * 策略（按可靠性排序）:
+ *   1. Shadow DOM(open) JS 穿透 —— 平台若用 open shadowRoot,这里就能点到
+ *   2. 选择器:旧版 .publish-page-publish-btn 内 button
+ *   3. **CDP pierce(仅无头)**:平台 2026-08 起把按钮放进 <xhs-publish-btn> 的
+ *      **closed** shadowRoot,上面 1/2 都拿不到;CDP 的 DOM.getDocument({pierce:true})
+ *      可穿透 closed shadow(DevTools 同款能力),实测这是无头下唯一可靠路径。
+ *      不写死坐标 —— 历史兜底坐标 (934,983) 的 y 超出无头 viewport(1280x720),
+ *      会点在页面空白处必然失败。
+ *   4. 屏幕坐标兜底(仅在 CDP 不可用时,保留旧行为,XHS_PUBLISH_X/Y 可覆盖)
+ */
+async function waitAndClickPublish(
+  page: Page,
+  opts: { headless?: boolean } = {},
+): Promise<{ by: 'webcomponent' | 'selector' | 'cdp-pierce' | 'coords' }> {
   // 等图片上传 + 页面稳定
   await new Promise((r) => setTimeout(r, 10000));
   // 2026-08 改版:真实提交按钮是 Web Component <xhs-publish-btn>(Shadow DOM)
@@ -85,6 +102,13 @@ async function waitAndClickPublish(page: Page): Promise<{ by: 'selector' | 'coor
   }
   if (await clickPublishBySelector(page)) {
     return { by: 'selector' };
+  }
+  // 无头模式:closed shadowRoot 下 JS 侧无能为力,用 CDP pierce 兜底
+  if (opts.headless) {
+    const hit = await clickPublishViaCdpPierce(page, 10000);
+    if (hit) {
+      return { by: 'cdp-pierce' };
+    }
   }
   // 发布按钮屏幕坐标(可通过 XHS_PUBLISH_X / XHS_PUBLISH_Y 环境变量覆盖,适配不同分辨率)
   const screenX = parseInt(process.env.XHS_PUBLISH_X ?? '934', 10);
@@ -194,10 +218,16 @@ export async function postNote(args: PostNoteArgs): Promise<PostNoteResult> {
     }
 
     if (autoPublish) {
-      const by = await waitAndClickPublish(page);
+      const by = await waitAndClickPublish(page, { headless });
+      // 以 URL 判定是否真的提交成功 —— 页面会跳回上传台，
+      // 页面上没有「发布成功」字样，靠文案匹配不可靠（原先是盲报成功）
+      const confirmed = isPublishConfirmed(page.url());
       return {
-        success: true,
-        message: `已自动点击「发布」(${by.by})，请留意页面是否发布成功`,
+        success: confirmed,
+        message: confirmed
+          ? `已提交「发布」(${by.by})，页面已确认 published=true`
+          : `已点击「发布」(${by.by})，但未在页面 URL 确认 published=true；`
+            + `请用 xhs recent 核对，未确认前勿重复提交`,
       };
     }
 

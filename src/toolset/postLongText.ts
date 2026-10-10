@@ -15,7 +15,7 @@ import { existsSync } from 'fs';
 import { resolve } from 'path';
 import { launchBrowser } from '../browser/index.js';
 import { ensureAppDataLayout } from '../config.js';
-import { PUBLISH_BUTTON_LABELS, clickWebComponentPublish } from './publishButton.js';
+import { PUBLISH_BUTTON_LABELS, clickWebComponentPublish, clickPublishViaCdpPierce } from './publishButton.js';
 import {
   validateArticleParams,
   type ArticlePostParams,
@@ -553,11 +553,29 @@ export async function postLongText(
     // ⑥ 进入常规发布页，点「发布」
     // 6a. 优先:Web Component <xhs-publish-btn>(2026-08 改版后的真实提交入口)
     console.error('⑥ 点击「发布」(常规发布页)…');
-    let pubBy: 'selector' | 'coords' | 'webcomponent';
+    let pubBy: 'selector' | 'coords' | 'webcomponent' | 'cdp-pierce';
     if (await clickWebComponentPublish(page, 12000)) {
       pubBy = 'webcomponent';
+    } else if (headless) {
+      // 6b. 无头模式:<xhs-publish-btn> 是 closed shadowRoot,JS 侧扫不到,
+      // 用 CDP pierce(DevTools 同款能力)穿透后动态取盒模型中心点击。
+      // 不写死坐标 —— 历史坐标 (934,983) 的 y 超出无头 viewport,会点空。
+      const hit = await clickPublishViaCdpPierce(page, 10000);
+      if (hit) {
+        pubBy = 'cdp-pierce';
+        console.error(`   CDP pierce 命中发布按钮 @(${hit.x},${hit.y})`);
+      } else {
+        const res = await clickFooterButton(page, {
+          labels: PUBLISH_LABELS,
+          envX: process.env.XHS_PUBLISH_X ?? '934',
+          envY: process.env.XHS_PUBLISH_Y ?? '983',
+          preWaitMs: 0,
+          pollMs: 10000,
+        });
+        pubBy = res.by;
+      }
     } else {
-      // 6b. 兜底:旧版"选择器+文案"(老版式 <button>),再不行坐标(历史校准位)
+      // 6c. 兜底:旧版"选择器+文案"(老版式 <button>),再不行坐标(历史校准位)
       const res = await clickFooterButton(page, {
         labels: PUBLISH_LABELS,
         envX: process.env.XHS_PUBLISH_X ?? '934',

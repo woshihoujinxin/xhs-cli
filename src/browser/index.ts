@@ -120,7 +120,12 @@ export async function launchBrowser(
     headless: headless,
     userDataDir: userDataDir,
     args: [...baseArgs, ...extraArgs],
-    defaultViewport: headless ? { width: 1280, height: 720 } : null,
+    // 无头视口高度：默认 720 会把发布页底部操作栏挤出裁剪区，
+    // 导致「发布」按钮落在视口外（CDP 兜底已用 scrollIntoViewIfNeeded 兼容，
+    // 但给足高度可减少一次滚动等待）。可用 XHS_VIEWPORT_H 覆盖。
+    defaultViewport: headless
+      ? { width: 1280, height: parseInt(process.env.XHS_VIEWPORT_H || '1000', 10) || 1000 }
+      : null,
     // 确保浏览器进程正确关闭，以便保存cookie
     handleSIGINT: true,
     handleSIGTERM: true,

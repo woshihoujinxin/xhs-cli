@@ -62,11 +62,20 @@ JSON files shaped `{ data, cachedAt }`. Every path goes through `resolveUnderCac
 
 `post` consumes only the `--title`, `--content`/`--content-file`, and `--image` paths of the current invocation (no queue, no drafts). Validation (`postValidate.ts`): title ≤ 20 chars, content 10–1000 chars, 1–18 images that must exist and be readable.
 
-By default it **only fills the form and leaves the browser window open** for human confirmation. `--publish` triggers an automatic click via **screen coordinates** (`XHS_PUBLISH_X`/`XHS_PUBLISH_Y`, default 934/983) converted to viewport coords at runtime. This is deliberately env-tunable because the XHS publish button's screen position is fragile to UI/layout changes.
+By default it **only fills the form and leaves the browser window open** for human confirmation. `--publish` triggers an automatic click. Since v1.9.0 the publish click resolves in this order:
+
+1. **open shadowRoot** JS pierce (`clickWebComponentPublish`)
+2. **selector + label** on the footer (legacy `<button>` markup)
+3. **CDP pierce, headless only** (`clickPublishViaCdpPierce`) — since the 2026-08 revamp the real submit button lives inside `<xhs-publish-btn>`, whose `shadowRoot` is **closed**, so steps 1–2 cannot see it from JS. `DOM.getDocument({depth:-1, pierce:true})` (the same capability DevTools uses) *does* pierce closed roots; we then `scrollIntoViewIfNeeded` + `getBoxModel` for the button's center, sanity-check it with `getNodeForLocation`, and dispatch `Input.dispatchMouseEvent` (press/release).
+4. **screen coordinates** (`XHS_PUBLISH_X`/`XHS_PUBLISH_Y`, default 934/983) — last-resort fallback when CDP is unavailable
+
+Steps 1–2 are untouched, and step 3 is gated on headless, so **headed behavior is unchanged**. Headless viewport height is `XHS_VIEWPORT_H` (default 1000; the old 720 clipped the footer out of view).
+
+Result verification uses the URL: a successful submit navigates to `.../publish?published=true`, so `isPublishConfirmed()` checks that instead of matching page text (the page returns to the upload screen, so there is no "发布成功" string to match).
 
 ### Long-text flow — `toolset/postLongText.ts` (CLI: `xhs longtext`)
 
-A parallel to `post` for the **article** entrypoint (`?from=menu&target=article`): you supply only `--title` + `--content`/`--content-file` (markdown, no local images). With `--publish`, it fills the article editor → clicks the footer **「下一步」** button (XHS then auto-renders the body into images) → waits for conversion → clicks **「发布」** on the regular publish page. Button clicks use the same **selector+label-first, screen-coordinate fallback** strategy as `post`'s publish, with two extra env knobs: `XHS_LONGTEXT_NEXT_X`/`XHS_LONGTEXT_NEXT_Y` (the 下一步 button) and `XHS_LONGTEXT_CONVERT_MS` (conversion wait, default 20000). Validation is `validateArticleParams` in `postValidate.ts` (lenient content limits vs. the 1000-char image-note cap).
+A parallel to `post` for the **article** entrypoint (`?from=menu&target=article`): you supply only `--title` + `--content`/`--content-file` (markdown, no local images). With `--publish`, it fills the article editor → clicks the footer **「下一步」** button (XHS then auto-renders the body into images) → waits for conversion → clicks **「发布」** on the regular publish page. Button clicks use the same four-tier strategy as `post`'s publish (including the headless-only CDP pierce for the closed shadowRoot), with two extra env knobs: `XHS_LONGTEXT_NEXT_X`/`XHS_LONGTEXT_NEXT_Y` (the 下一步 button) and `XHS_LONGTEXT_CONVERT_MS` (conversion wait, default 20000). Validation is `validateArticleParams` in `postValidate.ts` (lenient content limits vs. the 1000-char image-note cap).
 
 ## Release / publish
 
