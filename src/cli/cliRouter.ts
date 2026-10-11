@@ -21,6 +21,9 @@ import {
   takeLongTextDeferredExit,
   implOpenHome,
   resolveSession,
+  exportSession,
+  importSession,
+  checkSessionStatus,
 } from '../toolset/index.js';
 import {
   formatAccountListLines,
@@ -79,6 +82,11 @@ function printHelp(): void {
   xhs account show <name>
   xhs account use <name>
   xhs account current
+
+  # 登录态导入/导出（跨机器、跨操作系统迁移；用于把本机登录态搬到 Linux 服务器等）
+  xhs session export [--out <路径>] [--account <name>]
+  xhs session import <路径> [--account <name>]
+  xhs session status [--account <name>]
 
   # 平台草稿箱（创作者后台自动保存的草稿；删除不可恢复）
   xhs drafts list [--json] [--account <name>]
@@ -262,6 +270,74 @@ function runAccountCommand(tail: string[]): void {  const sub = tail[0]?.toLower
 }
 
 /**
+ * 登录态导入 / 导出。用于把本机登录态迁移到另一台机器（例如搬去 Linux 服务器）。
+ *
+ * 为什么需要它：Chrome cookie 由系统级加密保护（Windows 用 DPAPI）。
+ * 直接拷贝 userDataDir 到别的机器/OS 会解不开，等于没登录。
+ * 本命令走 CDP 导出已解密的明文，再在目标机注入。
+ */
+async function runSessionCommand(tail: string[]): Promise<void> {
+  const sub = tail[0]?.toLowerCase()?.trim();
+  const { opts, rest } = parseOpts(tail.slice(1));
+  try {
+    if (!sub || sub === 'help' || sub === '--help') {
+      die(
+        '用法:\n'
+        + '  session export [--out <路径>]   导出当前登录态（默认 ./session.json）\n'
+        + '  session import <路径>           导入登录态到本机\n'
+        + '  session status                  查看本机登录态\n'
+        + '\n通用选项: [--account <name>]\n'
+        + '⚠️ 导出文件是明文凭据，等同账号密码 —— chmod 600，用完 shred -u。',
+      );
+      return;
+    }
+
+    const session = resolveSessionCli(accountFromOpts(opts));
+
+    if (sub === 'status') {
+      const r = await checkSessionStatus({
+        browserUserDataDir: session.browserUserDataDir,
+        account: session.account,
+      });
+      console.log((r.ok ? '✅ ' : '❌ ') + r.message);
+      if (!r.ok) process.exitCode = 1;
+      return;
+    }
+
+    if (sub === 'export') {
+      const outPath = (opts.out || opts.o || 'session.json').trim();
+      const r = await exportSession({
+        browserUserDataDir: session.browserUserDataDir,
+        outPath,
+        account: session.account,
+      });
+      console.log((r.ok ? '' : '❌ ') + r.message);
+      if (!r.ok) process.exitCode = 1;
+      return;
+    }
+
+    if (sub === 'import') {
+      const inPath = rest[0]?.trim() || opts.in?.trim();
+      if (!inPath) {
+        die('用法: session import <路径>');
+      }
+      const r = await importSession({
+        browserUserDataDir: session.browserUserDataDir,
+        inPath,
+        account: session.account,
+      });
+      console.log((r.ok ? '' : '❌ ') + r.message);
+      if (!r.ok) process.exitCode = 1;
+      return;
+    }
+
+    die(`未知 session 子命令: ${sub}`);
+  } catch (e) {
+    die(`❌ ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
  * 执行一条子命令（与传入 `process.argv` 切片语义一致，不含 `xhs` 本身）。
  */
 export async function runOneCommand(argv: string[]): Promise<void> {
@@ -274,6 +350,10 @@ export async function runOneCommand(argv: string[]): Promise<void> {
 
   if (cmd === 'account') {
     runAccountCommand(tail);
+    return;
+  }
+  if (cmd === 'session') {
+    await runSessionCommand(tail);
     return;
   }
   if (cmd === 'drafts' || cmd === 'draft') {

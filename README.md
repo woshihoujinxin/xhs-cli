@@ -86,6 +86,45 @@ xhs posted
 
 未设置当前账号时，命令会提示先执行 `xhs account use <name>`。
 
+## 登录态导入 / 导出（跨机器、跨系统）
+
+Chrome 的 cookie 由系统级加密保护（Windows 用 DPAPI，绑定当前用户凭据），
+**直接拷贝 `browser-data` 目录到另一台机器会解不开，等于没登录**。
+
+本组命令走 CDP 导出「浏览器已解密的明文 cookie」，再在目标机注入，
+因此可跨机器、跨操作系统迁移 —— 典型场景是把本机登录态搬到 Linux 服务器跑无头发帖。
+
+| 命令 | 说明 |
+|------|------|
+| `xhs session export [--out <路径>]` | 导出当前登录态（默认 `./session.json`） |
+| `xhs session import <路径>` | 导入登录态到本机 |
+| `xhs session status` | 查看本机登录态（含账号名） |
+
+典型流程：
+
+```bash
+# 本机（已登录）导出
+xhs session export --out session.json
+scp session.json user@server:/root/     # 传到服务器
+
+# 服务器上导入
+chmod 600 session.json
+xhs session import session.json
+# ✅ 已注入 16 个 cookie / 登录态验证: 成功 / 发布页可达: 是 / 账号: xxx
+
+# 之后即可正常发帖
+XHS_HEADLESS=1 xhs post --title "..." --content-file ... --image ... --publish
+```
+
+> ⚠️ **导出文件是明文登录凭据，等同账号密码。**
+> 写入时已是 `0o600`；传输请走 `scp`，传完 `chmod 600`，用完 `shred -u` 删除。
+> 不要提交进 git、不要走 IM、不要放公开存储。
+>
+> ⚠️ **核心凭据有效期通常只有数天**（如 `galaxy_creator_session_id`、`access-token-creator`）。
+> 过期后需回源机器重新导出。若目标机导入后验证失败，多为 cookie 过期，
+> 或风控 cookie（`websectiga`/`acw_tc`）绑定了源机器 IP —— 此时需在目标机 `xhs login` 重新扫码。
+> **不要反复重试导入**，连续失败可能触发平台风控。
+
 ## 命令一览
 
 | 命令 | 说明 |
@@ -96,6 +135,9 @@ xhs posted
 | `xhs account show <name>` | 查看单账号配置 |
 | `xhs account use <name>` | 设置当前账号 |
 | `xhs account current` | 显示当前账号 |
+| `xhs session export [--out <路径>]` | 导出登录态（跨机器迁移用） |
+| `xhs session import <路径>` | 导入登录态 |
+| `xhs session status` | 查看登录态 |
 | `xhs login [--account <name>]` | 登录创作者中心 |
 | `xhs metrics [--account <name>]` | 运营数据摘要 |
 | `xhs recent [--limit N] [--account <name>]` | 创作者后台已发笔记 |

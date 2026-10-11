@@ -197,3 +197,12 @@ export async function implFetchAcademy(
 export { resolveAccountSlug, resolveSession };
 export { setCurrentAccount, getCurrentAccount } from './accountRegistry.js';
 export type { ResolvedSession };
+
+// 登录态导入 / 导出（跨机器、跨 OS 迁移）
+export {
+  exportSession,
+  importSession,
+  checkSessionStatus,
+  type SessionBundle,
+  type TransferResult,
+} from './sessionTransfer.js';
